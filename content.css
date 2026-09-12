@@ -1,0 +1,7 @@
+/* content.css - minimal host styles, actual panel styles are in Shadow DOM */
+#__llm_float_btn {
+  all: initial;
+}
+#__llm_chat_host {
+  all: initial;
+}

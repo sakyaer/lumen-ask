@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>Lumen Ask</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="app">
+    <!-- 左侧 Session 侧边栏 -->
+    <aside class="sidebar">
+      <div class="sidebar-top">
+        <button class="btn-new-chat" id="btnNewChat" title="新建对话">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+          新对话
+        </button>
+      </div>
+
+      <div class="session-list" id="sessionList">
+        <!-- Session items rendered by JS -->
+      </div>
+
+      <!-- 电子宠物猫 -->
+      <div class="pet-area" id="petArea">
+        <pre class="pet-ascii" id="petAscii"></pre>
+        <div class="pet-token-bar">
+          <div class="pet-token-label">
+            <span id="petTokenLabel">tokens</span>
+            <span id="petTokenCount">0</span>
+          </div>
+          <div class="pet-token-track">
+            <div class="pet-token-fill" id="petTokenFill"></div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 右侧对话区 -->
+    <main class="chat-area">
+      <!-- 未配置提示 -->
+      <div class="config-banner" id="configBanner" style="display:none;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"></circle>
+          <line x1="12" y1="8" x2="12" y2="12"></line>
+          <line x1="12" y1="16" x2="12.01" y2="16"></line>
+        </svg>
+        请先配置 API Key
+        <button class="banner-link" id="bannerGoSettings">前往设置 →</button>
+      </div>
+
+      <!-- 顶部栏 -->
+      <header class="chat-header">
+        <span class="chat-title" id="chatTitle">Lumen Ask</span>
+        <button class="btn-clear" id="btnClear" title="清空对话">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6l-1 14H6L5 6"></path>
+            <path d="M10 11v6M14 11v6"></path>
+            <path d="M9 6V4h6v2"></path>
+          </svg>
+        </button>
+      </header>
+
+      <!-- 消息列表 -->
+      <div class="messages-container" id="messagesContainer">
+        <!-- Empty state -->
+        <div class="empty-state" id="emptyState">
+          <div class="empty-icon">💬</div>
+          <p class="empty-title">开始聊天吧！</p>
+          <p class="empty-sub">在下方输入你的问题 ✨</p>
+        </div>
+      </div>
+
+      <!-- 底部输入区 -->
+      <div class="input-area">
+        <!-- 模型 combobox -->
+        <div class="model-bar" id="modelBar">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;color:var(--text-muted)">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path>
+          </svg>
+          <div class="model-select-wrapper" id="modelSelectWrapper">
+            <button class="model-select-btn" id="modelSelectBtn">
+              <span id="modelSelectLabel">选择模型</span>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+            <div class="model-dropdown" id="modelDropdown"></div>
+          </div>
+          <button class="btn-settings" id="btnSettings" title="设置">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"></circle>
+              <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="input-box">
+          <textarea
+            id="userInput"
+            class="user-input"
+            placeholder="输入消息... (Enter 发送，Shift+Enter 换行)"
+            rows="1"
+          ></textarea>
+          <button class="btn-send" id="btnSend" title="发送">
+            <svg id="sendIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

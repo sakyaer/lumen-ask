@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lumen Ask 设置</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="bg-orbs">
+    <div class="orb orb1"></div>
+    <div class="orb orb2"></div>
+    <div class="orb orb3"></div>
+  </div>
+
+  <div class="page-container">
+    <div class="header">
+      <div class="header-icon">⚙️</div>
+      <div class="header-text">
+        <h1>Lumen Ask 设置</h1>
+        <p>配置你的大模型 API 连接参数，支持 OpenAI 及兼容接口</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-section">
+        <div class="section-title" data-icon="🔑">API 认证</div>
+
+        <div class="form-group">
+          <label for="apiKey">API Key</label>
+          <div class="input-wrapper">
+            <input type="password" id="apiKey" class="form-input" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx">
+            <button class="eye-btn" id="toggleApiKey" title="显示/隐藏">
+              <svg id="eyeIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+            </button>
+          </div>
+          <p class="form-hint">OpenAI 格式的 API Key，以 <code>sk-</code> 开头</p>
+        </div>
+
+        <div class="form-group">
+          <label for="baseUrl">Base URL</label>
+          <input type="url" id="baseUrl" class="form-input" placeholder="https://api.openai.com/v1">
+          <p class="form-hint">
+            API 接口地址，留空则使用 OpenAI 官方地址。支持 DeepSeek、通义千问等兼容接口。<br>
+            腾讯 Token Plan 有两个端点，按协议二选一：<br>
+            · OpenAI 兼容：<code>https://api.lkeap.cloud.tencent.com/plan/v3</code><br>
+            · Anthropic 兼容：<code>https://api.lkeap.cloud.tencent.com/plan/anthropic</code>
+          </p>
+        </div>
+
+        <div class="form-group">
+          <label for="reasoningEffort">思考强度（推理模型专用）</label>
+          <input type="text" id="reasoningEffort" class="form-input" list="reasoningEffortOptions" placeholder="留空 = 不发送该参数">
+          <p class="form-hint">可填任意值（各家取值不同）：腾讯系认 <code>no_think</code>，OpenAI 系认 <code>minimal</code> / <code>low</code> / <code>medium</code> / <code>high</code>。留空则不发送该参数。</p>
+        </div>
+      </div>
+
+      <datalist id="reasoningEffortOptions">
+        <option value="no_think">no_think（快思考，腾讯系）</option>
+        <option value="minimal">minimal</option>
+        <option value="low">low</option>
+        <option value="medium">medium</option>
+        <option value="high">high（深度思考，较慢）</option>
+      </datalist>
+
+      <div class="divider"></div>
+
+      <div class="card-section">
+        <div class="section-title" data-icon="🤖">模型配置</div>
+
+        <div class="form-group">
+          <label for="modelSelect">预设模型</label>
+          <div class="select-wrapper">
+            <select id="modelSelect" class="form-select">
+              <option value="">-- 选择预设模型 --</option>
+              <optgroup label="OpenAI">
+                <option value="gpt-5.2">GPT-5.2（旗舰）</option>
+                <option value="gpt-5.1">GPT-5.1（编码）</option>
+                <option value="gpt-5">GPT-5</option>
+                <option value="gpt-5-mini">GPT-5 Mini</option>
+                <option value="gpt-5-nano">GPT-5 Nano</option>
+              </optgroup>
+              <optgroup label="Anthropic Claude">
+                <option value="claude-fable-5">Claude Fable 5（最强）</option>
+                <option value="claude-opus-5">Claude Opus 5</option>
+                <option value="claude-sonnet-5">Claude Sonnet 5</option>
+                <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
+              </optgroup>
+              <optgroup label="腾讯 Token Plan (Anthropic 兼容)">
+                <option value="tc-code-latest">Auto（智能路由）</option>
+                <option value="hy4-preview">Hy4 Preview（混元）</option>
+                <option value="hy3">Hy3（混元）</option>
+                <option value="deepseek-v4-pro-202606">DeepSeek V4 Pro</option>
+                <option value="deepseek-v4-flash-202605">DeepSeek V4 Flash</option>
+                <option value="glm-5.3">GLM-5.3</option>
+                <option value="glm-5.2">GLM-5.2</option>
+                <option value="glm-5.1">GLM-5.1</option>
+                <option value="glm-5">GLM-5</option>
+                <option value="minimax-m3">MiniMax M3</option>
+                <option value="minimax-m2.7">MiniMax M2.7</option>
+                <option value="kimi-k2.7-code">Kimi K2.7 Code</option>
+              </optgroup>
+              <optgroup label="DeepSeek">
+                <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
+                <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
+              </optgroup>
+              <optgroup label="通义千问">
+                <option value="qwen3.8-max">通义千问 3.8-Max</option>
+                <option value="qwen3.7-plus">通义千问 3.7-Plus</option>
+              </optgroup>
+              <option value="custom">自定义...</option>
+            </select>
+            <svg class="select-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </div>
+        </div>
+
+        <div class="form-group" id="customModelGroup" style="display:none;">
+          <label for="customModel">自定义模型名称</label>
+          <input type="text" id="customModel" class="form-input" placeholder="输入模型名称，例如：claude-opus-5">
+        </div>
+
+        <div class="form-group">
+          <label for="systemPrompt">System Prompt <span class="optional-tag">可选</span></label>
+          <textarea id="systemPrompt" class="form-textarea" rows="3" placeholder="你是一个有帮助的 AI 助手。"></textarea>
+          <p class="form-hint">自定义 AI 的行为和角色设定</p>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="card-section">
+        <div class="section-title" data-icon="🎨">外观主题</div>
+        <div class="form-group">
+          <label>选择配色风格</label>
+          <div class="theme-picker" id="themePicker">
+            <button class="theme-card" data-theme="duolingo">
+              <div class="theme-preview">
+                <span style="background:#58CC02"></span>
+                <span style="background:#FF9600"></span>
+                <span style="background:#1CB0F6"></span>
+              </div>
+              <div class="theme-name">🦜 多邻国</div>
+              <div class="theme-desc">活力绿·橙·蓝</div>
+            </button>
+            <button class="theme-card" data-theme="ocean">
+              <div class="theme-preview">
+                <span style="background:#00C9A7"></span>
+                <span style="background:#7B61FF"></span>
+                <span style="background:#3B82F6"></span>
+              </div>
+              <div class="theme-name">🌊 深海</div>
+              <div class="theme-desc">薄荷·紫罗兰·蓝</div>
+            </button>
+            <button class="theme-card" data-theme="sakura">
+              <div class="theme-preview">
+                <span style="background:#FF6BB5"></span>
+                <span style="background:#FF8C42"></span>
+                <span style="background:#A855F7"></span>
+              </div>
+              <div class="theme-name">🌸 樱花</div>
+              <div class="theme-desc">粉·蜜橙·紫</div>
+            </button>
+            <button class="theme-card" data-theme="midnight">
+              <div class="theme-preview">
+                <span style="background:#7C3AED"></span>
+                <span style="background:#06B6D4"></span>
+                <span style="background:#6366F1"></span>
+              </div>
+              <div class="theme-name">🌌 午夜</div>
+              <div class="theme-desc">深紫·青·靛蓝</div>
+            </button>
+            <button class="theme-card" data-theme="forest">
+              <div class="theme-preview">
+                <span style="background:#10B981"></span>
+                <span style="background:#F59E0B"></span>
+                <span style="background:#34D399"></span>
+              </div>
+              <div class="theme-name">🌲 深林</div>
+              <div class="theme-desc">墨绿·琥珀·薄荷</div>
+            </button>
+          </div>
+          <input type="hidden" id="themeValue" value="duolingo">
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="card-section">
+        <div class="section-title" data-icon="✨">划词功能</div>
+        <div class="toggle-row">
+          <div>
+            <div class="toggle-label">启用划词快捷提问</div>
+            <div class="toggle-desc">在网页中选中文字后，右侧会出现 AI 图标，点击可快速提问</div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="enableSelection" checked>
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="form-group" style="margin-top:20px;">
+          <label for="selectionModel">划词使用的模型</label>
+          <div class="select-wrapper">
+            <select id="selectionModel" class="form-select">
+              <option value="">跟随主配置（当前模型）</option>
+              <optgroup label="腾讯 Token Plan">
+                <option value="tc-code-latest">Auto（智能路由）</option>
+                <option value="hy4-preview">Hy4 Preview（混元）</option>
+                <option value="hy3">Hy3（混元）</option>
+                <option value="deepseek-v4-pro-202606">DeepSeek V4 Pro</option>
+                <option value="deepseek-v4-flash-202605">DeepSeek V4 Flash</option>
+                <option value="glm-5.3">GLM-5.3</option>
+                <option value="glm-5.2">GLM-5.2</option>
+                <option value="glm-5.1">GLM-5.1</option>
+                <option value="glm-5">GLM-5</option>
+                <option value="minimax-m3">MiniMax M3</option>
+                <option value="minimax-m2.7">MiniMax M2.7</option>
+                <option value="kimi-k2.7-code">Kimi K2.7 Code</option>
+              </optgroup>
+              <optgroup label="OpenAI">
+                <option value="gpt-5.2">GPT-5.2（旗舰）</option>
+                <option value="gpt-5.1">GPT-5.1（编码）</option>
+                <option value="gpt-5">GPT-5</option>
+                <option value="gpt-5-mini">GPT-5 Mini</option>
+                <option value="gpt-5-nano">GPT-5 Nano</option>
+              </optgroup>
+              <optgroup label="Anthropic Claude">
+                <option value="claude-fable-5">Claude Fable 5（最强）</option>
+                <option value="claude-opus-5">Claude Opus 5</option>
+                <option value="claude-sonnet-5">Claude Sonnet 5</option>
+                <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
+              </optgroup>
+              <optgroup label="DeepSeek">
+                <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
+                <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
+              </optgroup>
+              <optgroup label="通义千问">
+                <option value="qwen3.8-max">通义千问 3.8-Max</option>
+                <option value="qwen3.7-plus">通义千问 3.7-Plus</option>
+              </optgroup>
+            </select>
+            <svg class="select-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="6 9 12 15 18 9"></polyline>
+            </svg>
+          </div>
+          <p class="form-hint">划词面板提问时使用哪个模型。留空则跟随主配置的当前模型。面板顶部也能直接切换。</p>
+        </div>
+
+        <div class="form-group" style="margin-top:20px;">
+          <label for="selectionReasoningEffort">划词思考强度</label>
+          <input type="text" id="selectionReasoningEffort" class="form-input" list="reasoningEffortOptions" placeholder="默认 no_think">
+          <p class="form-hint">划词默认 <code>no_think</code>（不思考，最快）。留空 = 不发送该参数；也可填 <code>minimal</code> / <code>low</code> / <code>medium</code> / <code>high</code> 或任意值。划词面板顶部也能直接调。</p>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="card-section">
+        <div class="section-title" data-icon="⚡">划词快捷按钮</div>
+        <div class="toggle-desc" style="margin-bottom:16px;">自定义划词面板中的快捷提问按钮。每条包含<strong>按钮名称</strong>和<strong>提示词</strong>，提示词中的 <code>{text}</code> 会被替换为选中的文字。</div>
+        <div id="presetEditor" class="preset-editor"></div>
+        <button class="btn-add-preset" id="btnAddPreset">+ 添加快捷按钮</button>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="card-section">
+        <div class="section-title" data-icon="🐱">电子宠物</div>
+        <div class="form-group">
+          <label for="tokenLimit">Token 用量上限（进度条满格）</label>
+          <input type="number" id="tokenLimit" class="form-input" placeholder="30000000" min="1000" step="1000">
+          <p class="form-hint">进度条满格时对应的累计 token 数，默认 3000 万。修改后重新打开 Popup 生效。</p>
+        </div>
+        <div class="toggle-row" style="margin-top:4px;">
+          <div>
+            <div class="toggle-label">重置 Token 计数</div>
+            <div class="toggle-desc">清零当前累计 token 用量，宠物猫体型重置为小猫</div>
+          </div>
+          <button class="btn-reset-token" id="btnResetToken">重置</button>
+        </div>
+      </div>
+
+      <div class="btn-row">
+        <div id="saveMsg" class="save-msg"></div>
+        <button class="btn-save" id="saveBtn">
+          <svg id="saveBtnIcon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"></path>
+            <polyline points="17 21 17 13 7 13 7 21"></polyline>
+            <polyline points="7 3 7 8 15 8"></polyline>
+          </svg>
+          <span id="saveBtnText">保存设置</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="footer-tip">
+      🔒 配置信息通过 chrome.storage.sync 安全保存在浏览器本地，不会上传到任何服务器
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
