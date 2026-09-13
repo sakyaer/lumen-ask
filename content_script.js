@@ -4,6 +4,7 @@
   const SESSIONS_KEY = 'llm_sessions';
   const ACTIVE_ID_KEY = 'llm_active_session_id';
   const CONFIG_KEY = 'llm_config';
+  const TOKEN_KEY = 'llm_total_tokens';
   const MAX_SESSIONS = 50;
 
   // 防重复注入。若本页已注入过（插件重载后 background 会重新注入一次），
@@ -217,15 +218,34 @@
     bindPanelEvents();
   }
 
+  // ===== 面板尺寸（设置页可配）=====
+  // 默认宽度 468 = 原 360×1.3；回答区 288 = 原 180×1.6
+  function getPanelWidth() {
+    const w = Number(cachedConfig && cachedConfig.panelWidth);
+    return Number.isFinite(w) && w >= 320 ? Math.min(w, 800) : 468;
+  }
+  function getReplyHeight() {
+    const h = Number(cachedConfig && cachedConfig.replyHeight);
+    return Number.isFinite(h) && h >= 120 ? Math.min(h, 800) : 288;
+  }
+
   function showPanel() {
     createPanelIfNeeded();
+
+    // 按配置应用面板宽度 / 回答区高度
+    const panelEl = shadowRoot.getElementById('panel');
+    const replyAreaEl = shadowRoot.getElementById('reply-area');
+    if (panelEl) panelEl.style.width = getPanelWidth() + 'px';
+    if (replyAreaEl) replyAreaEl.style.maxHeight = getReplyHeight() + 'px';
 
     // Position near the selection
     let rect = currentRange ? currentRange.getBoundingClientRect() : null;
     if (!rect || (rect.width === 0 && rect.height === 0 && rect.top === 0 && rect.left === 0)) {
       rect = { right: lastPointer.x, bottom: lastPointer.y, top: lastPointer.y, left: lastPointer.x };
     }
-    const panelW = 360, panelH = 460;
+    const panelW = getPanelWidth();
+    // 高度估算：回答区之外的部分（标题/选区/控件/按钮）约占 280px
+    const panelH = 280 + getReplyHeight();
     const vpW = window.innerWidth, vpH = window.innerHeight;
 
     let left = rect.right + window.scrollX - panelW;
@@ -378,7 +398,8 @@
       }
 
       #panel {
-        width: 360px;
+        width: 468px;
+        max-width: calc(100vw - 16px);
         background: #FFFFFF;
         border: 3px solid #AFAFAF;
         border-radius: 18px;
@@ -589,7 +610,7 @@
       .send-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
       .reply-area {
-        max-height: 180px;
+        max-height: 288px;
         overflow-y: auto;
         border-bottom: 2px solid #E5E5E5;
         background: #F7F7F7;
@@ -634,8 +655,96 @@
         color: #3C3C3C;
         line-height: 1.65;
         word-break: break-word;
-        white-space: pre-wrap;
         animation: msgPop 0.3s cubic-bezier(0.34,1.56,0.64,1);
+      }
+      /* 内容较长时整体缩小一号 */
+      .reply-content.compact { font-size: 12px; line-height: 1.55; }
+
+      /* ===== Markdown 元素 ===== */
+      .md-p { margin: 0 0 6px; }
+      .md-p:last-child { margin-bottom: 0; }
+      .md-h {
+        font-weight: 800;
+        color: #3C3C3C;
+        margin: 8px 0 4px;
+        line-height: 1.4;
+      }
+      .md-h:first-child { margin-top: 0; }
+      h2.md-h { font-size: 16px; }
+      h3.md-h { font-size: 15px; }
+      h4.md-h { font-size: 14px; }
+      h5.md-h { font-size: 13px; }
+      .reply-content.compact h2.md-h { font-size: 15px; }
+      .reply-content.compact h3.md-h { font-size: 14px; }
+      .reply-content.compact h4.md-h { font-size: 13px; }
+      .reply-content.compact h5.md-h { font-size: 12px; }
+
+      .md-code {
+        background: #2F2F2F;
+        color: #EDEDED;
+        border-radius: 8px;
+        padding: 8px 10px;
+        margin: 6px 0;
+        overflow-x: auto;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11.5px;
+        line-height: 1.5;
+        white-space: pre;
+      }
+      .reply-content.compact .md-code { font-size: 10.5px; }
+      .md-code code { font-family: inherit; background: none; padding: 0; }
+
+      .md-inline-code {
+        background: rgba(99,102,241,0.12);
+        color: #5B54D9;
+        border-radius: 4px;
+        padding: 1px 5px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.92em;
+      }
+
+      .md-list {
+        margin: 4px 0 6px;
+        padding-left: 20px;
+      }
+      .md-list li { margin: 2px 0; }
+
+      .md-quote {
+        border-left: 3px solid #1CB0F6;
+        background: #E8F4FF;
+        border-radius: 0 8px 8px 0;
+        padding: 6px 10px;
+        margin: 6px 0;
+        color: #555555;
+      }
+
+      .md-hr {
+        border: none;
+        border-top: 1.5px solid #E5E5E5;
+        margin: 8px 0;
+      }
+
+      .md-table-wrap {
+        overflow-x: auto;
+        margin: 6px 0;
+      }
+      .md-table {
+        border-collapse: collapse;
+        font-size: 12px;
+        min-width: 100%;
+      }
+      .reply-content.compact .md-table { font-size: 11px; }
+      .md-table th, .md-table td {
+        border: 1px solid #E0E0E0;
+        padding: 4px 8px;
+        text-align: left;
+      }
+      .md-table th { background: #EFEFEF; font-weight: 800; }
+
+      .reply-content a {
+        color: #0090D4;
+        text-decoration: underline;
+        word-break: break-all;
       }
 
       .cursor {
@@ -990,8 +1099,7 @@
           if (loading) loading.style.display = 'none';
           if (statusEl && statusEl.textContent) setStatus('');
           fullReply += chunk;
-          replyContent.textContent = fullReply;
-          replyContent.innerHTML = fullReply.replace(/\n/g, '<br>') + '<span class="cursor"></span>';
+          renderReply(fullReply, true);
           replyArea.scrollTop = replyArea.scrollHeight;
         },
       });
@@ -1010,8 +1118,11 @@
     try {
       if (fullReply !== null) {
         // Remove cursor
-        replyContent.innerHTML = fullReply.replace(/\n/g, '<br>');
+        renderReply(fullReply, false);
         lastMessages.push({ role: 'assistant', content: fullReply });
+
+        // 计入 token 用量（提示词 + 回复），与 popup 的统计口径一致
+        recordTokenUsage(lastMessages.filter(m => m.role === 'user').map(m => m.content).join('\n'), fullReply);
 
         // 自动保存本次划词对话到聊天记录（标题加 [划词] 前缀）
         const savedId = await saveCurrentToSession();
@@ -1035,6 +1146,38 @@
       if (loading) loading.style.display = 'none';
       setStatus('');
     }
+  }
+
+  // ===== Reply 渲染（Markdown + 长文自动缩小字号）=====
+  // 内容超过 COMPACT_THRESHOLD 字后加 .compact 类，整体小一号显示
+  const COMPACT_THRESHOLD = 500;
+
+  function renderReply(text, streaming) {
+    const replyContent = shadowRoot.getElementById('reply-content');
+    if (!replyContent) return;
+    replyContent.classList.toggle('compact', text.length > COMPACT_THRESHOLD);
+    replyContent.innerHTML = LumenMD.render(text) + (streaming ? '<span class="cursor"></span>' : '');
+    const replyArea = shadowRoot.getElementById('reply-area');
+    if (replyArea && streaming) replyArea.scrollTop = replyArea.scrollHeight;
+  }
+
+  // 粗略估算 token 数（与 popup 同一算法：CJK ≈ 1.5 字符/token，其余 ≈ 4 字符/token）
+  function estimateTokens(text) {
+    if (!text) return 0;
+    const cjk = (text.match(/[\u4e00-\u9fff\u3040-\u30ff]/g) || []).length;
+    const rest = text.length - cjk;
+    return Math.ceil(cjk / 1.5 + rest / 4);
+  }
+
+  // 把本次划词请求的 token 用量累加进 llm_total_tokens（popup 的宠物进度条读取该值）。
+  // 读-加-写而非整值覆盖，避免与 popup 同时写入时互相吃掉对方的增量。
+  async function recordTokenUsage(promptText, replyText) {
+    const added = estimateTokens(promptText) + estimateTokens(replyText);
+    if (!added) return;
+    try {
+      const data = await chrome.storage.local.get(TOKEN_KEY);
+      await chrome.storage.local.set({ [TOKEN_KEY]: (data[TOKEN_KEY] || 0) + added });
+    } catch { /* context invalidated 时静默忽略 */ }
   }
 
   function showReply(text, isError = false) {
@@ -1072,7 +1215,8 @@
     const rawTitle = firstUserMsg
       ? firstUserMsg.content.slice(0, 24) + (firstUserMsg.content.length > 24 ? '…' : '')
       : '划词对话';
-    const title = '[划词] ' + rawTitle;
+    // 侧栏已有「划词」徽标标明来源，标题不再重复加前缀
+    const title = rawTitle;
 
     const session = {
       id,

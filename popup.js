@@ -246,7 +246,7 @@ function renderSidebar() {
       ? '<span class="session-source">划词</span>' : '';
 
     item.innerHTML = `
-      <span class="session-name">${escHtml(session.title)}${sourceTag}</span>
+      <span class="session-name">${escHtml(displayTitle(session.title))}${sourceTag}</span>
       <span class="session-time">${relativeTime(session.updatedAt)}</span>
       <button class="session-delete" data-id="${session.id}" title="删除">×</button>
     `;
@@ -273,12 +273,12 @@ function renderMessages(instant = true) {
   if (!session || session.messages.length === 0) {
     messagesEl.appendChild(emptyStateEl);
     emptyStateEl.style.display = 'flex';
-    chatTitleEl.textContent = session ? session.title : 'Lumen Ask';
+    chatTitleEl.textContent = session ? displayTitle(session.title) : 'Lumen Ask';
     return;
   }
 
   emptyStateEl.style.display = 'none';
-  chatTitleEl.textContent = session.title;
+  chatTitleEl.textContent = displayTitle(session.title);
 
   session.messages.forEach(msg => {
     if (msg.role === 'system') return;
@@ -295,12 +295,8 @@ function appendMessageDOM(role, content, isStreaming = false) {
   const div = document.createElement('div');
   div.className = `message ${role}`;
 
-  const avatarUser = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
-  const avatarAI = `<svg width="17" height="17" viewBox="0 0 100 100" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M15 10 L15 32 Q5 28 5 20 Q5 10 15 10Z"/><path d="M85 10 L85 32 Q95 28 95 20 Q95 10 85 10Z"/><ellipse cx="50" cy="52" rx="38" ry="36"/><circle cx="36" cy="47" r="5.5" fill="var(--bg,#fff)"/><circle cx="64" cy="47" r="5.5" fill="var(--bg,#fff)"/><circle cx="37.5" cy="48" r="2.5" fill="#333"/><circle cx="65.5" cy="48" r="2.5" fill="#333"/><path d="M44 60 Q50 65 56 60" stroke="var(--bg,#fff)" stroke-width="2.5" fill="none" stroke-linecap="round"/><line x1="20" y1="56" x2="38" y2="60" stroke="var(--bg,#fff)" stroke-width="2" stroke-linecap="round"/><line x1="20" y1="63" x2="38" y2="63" stroke="var(--bg,#fff)" stroke-width="2" stroke-linecap="round"/><line x1="62" y1="60" x2="80" y2="56" stroke="var(--bg,#fff)" stroke-width="2" stroke-linecap="round"/><line x1="62" y1="63" x2="80" y2="63" stroke="var(--bg,#fff)" stroke-width="2" stroke-linecap="round"/></svg>`;
-  const avatar = role === 'user' ? avatarUser : avatarAI;
   div.innerHTML = `
-    <div class="msg-avatar">${avatar}</div>
-    <div class="msg-content">${role === 'user' ? escHtml(content) : renderMarkdownLite(content)}${isStreaming ? '<span class="cursor"></span>' : ''}</div>
+    <div class="msg-content">${role === 'user' ? escHtml(content) : LumenMD.render(content)}${isStreaming ? '<span class="cursor"></span>' : ''}</div>
   `;
 
   if (emptyStateEl.parentNode === messagesEl) {
@@ -370,7 +366,7 @@ async function sendMessage() {
           fullReply += chunk;
           // 只有用户仍在查看这个 session 时才实时更新 DOM
           if (activeSessionId === thisSessionId) {
-            contentEl.innerHTML = renderMarkdownLite(fullReply);
+            contentEl.innerHTML = LumenMD.render(fullReply);
             contentEl.insertAdjacentHTML('beforeend', '<span class="cursor"></span>');
             scrollToBottom();
           }
@@ -390,10 +386,16 @@ async function sendMessage() {
 
     if (fullReply !== null) {
       session.messages.push({ role: 'assistant', content: fullReply });
+      // 划词请求也会累加 TOKEN_KEY，这里先读回最新总量再追加本次增量，
+      // 避免整值覆盖时吃掉划词期间新增的用量
       const addedTokens = estimateTokens(text) + estimateTokens(fullReply);
+      try {
+        const tdata = await chrome.storage.local.get(TOKEN_KEY);
+        petTotalTokens = tdata[TOKEN_KEY] || 0;
+        await chrome.storage.local.set({ [TOKEN_KEY]: petTotalTokens + addedTokens });
+      } catch {}
       updateTokenBar(addedTokens);
       petStartEating(addedTokens);
-      chrome.storage.local.set({ [TOKEN_KEY]: petTotalTokens });
     }
 
     session.updatedAt = Date.now();
@@ -804,19 +806,13 @@ function escHtml(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
-    .replace(/\n/g, '<br>');
+    // 连续换行折叠为一个换行，避免提示词里的空段落在气泡中撑出一大段空白
+    .replace(/\n+/g, '<br>');
 }
 
-function renderMarkdownLite(text) {
-  return text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/```([\s\S]*?)```/g, (_, code) => `<pre style="background:rgba(0,0,0,0.3);padding:8px;border-radius:6px;overflow-x:auto;font-size:12px;margin:4px 0"><code>${code.trim()}</code></pre>`)
-    .replace(/`([^`]+)`/g, '<code style="background:rgba(99,102,241,0.15);padding:1px 5px;border-radius:4px;font-size:12px">$1</code>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/\n/g, '<br>');
+// 兼容旧数据：侧栏徽标已标明划词来源，展示时去掉旧版保存的「[划词] 」标题前缀
+function displayTitle(t) {
+  return (t || '').replace(/^\[划词\]\s*/, '');
 }
 
 function relativeTime(ts) {

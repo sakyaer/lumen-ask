@@ -256,6 +256,18 @@
           <input type="text" id="selectionReasoningEffort" class="form-input" list="reasoningEffortOptions" placeholder="默认 no_think">
           <p class="form-hint">划词默认 <code>no_think</code>（不思考，最快）。留空 = 不发送该参数；也可填 <code>minimal</code> / <code>low</code> / <code>medium</code> / <code>high</code> 或任意值。划词面板顶部也能直接调。</p>
         </div>
+
+        <div class="form-group" style="margin-top:20px;">
+          <label for="panelWidth">划词面板宽度（px）</label>
+          <input type="number" id="panelWidth" class="form-input" placeholder="468" min="320" max="800" step="4">
+          <p class="form-hint">默认 468，可填 320–800。窗口不够宽时会自动收缩。保存后重新打开面板生效。</p>
+        </div>
+
+        <div class="form-group" style="margin-top:20px;">
+          <label for="replyHeight">回答区最大高度（px）</label>
+          <input type="number" id="replyHeight" class="form-input" placeholder="288" min="120" max="800" step="8">
+          <p class="form-hint">默认 288，可填 120–800。回答超出时在区内滚动。保存后重新打开面板生效。</p>
+        </div>
       </div>
 
       <div class="divider"></div>

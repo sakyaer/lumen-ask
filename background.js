@@ -17,7 +17,7 @@ async function reinjectToOpenTabs() {
       if (tab.url && !/^https?:/i.test(tab.url)) continue;
       chrome.scripting.executeScript({
         target: { tabId: tab.id, allFrames: true },
-        files: ['content_script.js'],
+        files: ['md-renderer.js', 'content_script.js'],
       }).catch(() => {});   // chrome:// 等不可注入的页面，忽略
     }
   } catch (e) {

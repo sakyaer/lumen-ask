@@ -24,6 +24,8 @@ const enableSelectionInput = $('enableSelection');
 const selectionModelInput = $('selectionModel');
 const reasoningEffortInput = $('reasoningEffort');
 const selectionReasoningEffortInput = $('selectionReasoningEffort');
+const panelWidthInput = $('panelWidth');
+const replyHeightInput = $('replyHeight');
 const presetEditor = $('presetEditor');
 const btnAddPreset = $('btnAddPreset');
 const tokenLimitInput = $('tokenLimit');
@@ -68,6 +70,9 @@ chrome.storage.sync.get(STORAGE_KEY, result => {
       cfg.selectionReasoningEffort !== undefined ? cfg.selectionReasoningEffort : 'no_think';
   }
   tokenLimitInput.value = cfg.tokenLimit || DEFAULT_TOKEN_LIMIT;
+  // 面板尺寸：默认宽度 468 = 原 360×1.3，回答区 288 = 原 180×1.6
+  panelWidthInput.value = cfg.panelWidth || 468;
+  replyHeightInput.value = cfg.replyHeight || 288;
 
   // Load preset prompts
   const presets = Array.isArray(cfg.presetPrompts) && cfg.presetPrompts.length
@@ -147,9 +152,13 @@ saveBtn.addEventListener('click', async () => {
 
   const selectionReasoningEffort = selectionReasoningEffortInput ? selectionReasoningEffortInput.value : 'no_think';
 
+  const panelWidth = Math.min(Math.max(parseInt(panelWidthInput.value) || 468, 320), 800);
+  const replyHeight = Math.min(Math.max(parseInt(replyHeightInput.value) || 288, 120), 800);
+
   const config = {
     apiKey, baseUrl, model, systemPrompt, enableSelection, selectionModel,
     reasoningEffort, selectionReasoningEffort,
+    panelWidth, replyHeight,
     presetPrompts: collectPresets(), tokenLimit, theme
   };
 
