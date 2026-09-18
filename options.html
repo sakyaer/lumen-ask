@@ -54,16 +54,26 @@
         <div class="form-group">
           <label for="reasoningEffort">思考强度（推理模型专用）</label>
           <input type="text" id="reasoningEffort" class="form-input" list="reasoningEffortOptions" placeholder="留空 = 不发送该参数">
-          <p class="form-hint">可填任意值（各家取值不同）：腾讯系认 <code>no_think</code>，OpenAI 系认 <code>minimal</code> / <code>low</code> / <code>medium</code> / <code>high</code>。留空则不发送该参数。</p>
+          <p class="form-hint">
+            可填任意值（各家取值不同）：<br>
+            · Anthropic / Claude 系（含腾讯 <code>/plan/anthropic</code>）：<code>low</code> / <code>medium</code> / <code>high</code> / <code>xhigh</code> / <code>max</code>，
+            会自动发成 <code>thinking:{type:"adaptive"}</code> + <code>output_config.effort</code>；旧模型（Haiku 4.5 等）自动退回 <code>budget_tokens</code>。<br>
+            · OpenAI 系：<code>minimal</code> / <code>low</code> / <code>medium</code> / <code>high</code>。<br>
+            · 腾讯混元等 OpenAI 兼容端点：认 <code>no_think</code>。<br>
+            · 不思考：<code>no_think</code> / <code>low</code> / <code>minimal</code> 都会被当成"关闭思考"（Claude 端发 <code>thinking:{type:"disabled"}</code>）。<br>
+            留空则不发送该参数。
+          </p>
         </div>
       </div>
 
       <datalist id="reasoningEffortOptions">
-        <option value="no_think">no_think（快思考，腾讯系）</option>
-        <option value="minimal">minimal</option>
-        <option value="low">low</option>
-        <option value="medium">medium</option>
-        <option value="high">high（深度思考，较慢）</option>
+        <option value="no_think">no_think（不思考，最快）</option>
+        <option value="minimal">minimal（OpenAI 最浅档）</option>
+        <option value="low">low（Claude / OpenAI：浅思考）</option>
+        <option value="medium">medium（Claude / OpenAI：中等）</option>
+        <option value="high">high（Claude / OpenAI：默认深度）</option>
+        <option value="xhigh">xhigh（Anthropic：更深，更慢）</option>
+        <option value="max">max（Anthropic：最深度思考，最慢）</option>
       </datalist>
 
       <div class="divider"></div>
@@ -77,8 +87,19 @@
             <select id="modelSelect" class="form-select">
               <option value="">-- 选择预设模型 --</option>
               <optgroup label="OpenAI">
-                <option value="gpt-5.2">GPT-5.2（旗舰）</option>
-                <option value="gpt-5.1">GPT-5.1（编码）</option>
+                <option value="gpt-6-astra">GPT-6 Astra（最新旗舰）</option>
+                <option value="gpt-5.6-sol">GPT-5.6 Sol（上一代旗舰）</option>
+                <option value="gpt-5.6-terra">GPT-5.6 Terra（均衡）</option>
+                <option value="gpt-5.6-luna">GPT-5.6 Luna（轻快）</option>
+                <option value="gpt-5.5">GPT-5.5</option>
+                <option value="gpt-5.5-pro">GPT-5.5 Pro（最贵，深度推理）</option>
+                <option value="gpt-5.4">GPT-5.4</option>
+                <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
+                <option value="gpt-5.4-nano">GPT-5.4 Nano</option>
+                <option value="gpt-5.4-pro">GPT-5.4 Pro</option>
+                <option disabled>── 以下为旧版，仍可用 ──</option>
+                <option value="gpt-5.2">GPT-5.2</option>
+                <option value="gpt-5.1">GPT-5.1</option>
                 <option value="gpt-5">GPT-5</option>
                 <option value="gpt-5-mini">GPT-5 Mini</option>
                 <option value="gpt-5-nano">GPT-5 Nano</option>
@@ -93,19 +114,28 @@
                 <option value="tc-code-latest">Auto（智能路由）</option>
                 <option value="hy4-preview">Hy4 Preview（混元）</option>
                 <option value="hy3">Hy3（混元）</option>
-                <option value="deepseek-v4-pro-202606">DeepSeek V4 Pro</option>
-                <option value="deepseek-v4-flash-202605">DeepSeek V4 Flash</option>
+                <option value="deepseek/deepseek-flash">DeepSeek V4.1 Flash 原厂直供（最新）</option>
+                <option value="deepseek-v4-pro-202606">DeepSeek V4 Pro 正式版</option>
+                <option value="deepseek-v4-flash-202605">DeepSeek V4 Flash 正式版</option>
                 <option value="glm-5.3">GLM-5.3</option>
+                <option value="glm-5.3-flash">GLM-5.3-Flash</option>
+                <option value="glm-5.3-flashx">GLM-5.3-FlashX</option>
                 <option value="glm-5.2">GLM-5.2</option>
-                <option value="glm-5.1">GLM-5.1</option>
-                <option value="glm-5">GLM-5</option>
                 <option value="minimax-m3">MiniMax M3</option>
                 <option value="minimax-m2.7">MiniMax M2.7</option>
+                <option value="kimi-k3">Kimi K3</option>
+                <option value="kimi-k2.8-preview">Kimi K2.8 Preview</option>
                 <option value="kimi-k2.7-code">Kimi K2.7 Code</option>
               </optgroup>
+              <optgroup label="腾讯 Token Plan（旧版，2026-10 下线）">
+                <option value="glm-5.1">GLM-5.1</option>
+                <option value="glm-5">GLM-5</option>
+                <option value="glm-5-turbo">GLM-5-Turbo</option>
+              </optgroup>
               <optgroup label="DeepSeek">
+                <option value="deepseek-flash">DeepSeek V4.1 Flash（最新）</option>
                 <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
-                <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
+                <option value="deepseek-v4-flash">DeepSeek V4 Flash（旧名，已指向 V4.1）</option>
               </optgroup>
               <optgroup label="通义千问">
                 <option value="qwen3.8-max">通义千问 3.8-Max</option>
@@ -212,22 +242,30 @@
                 <option value="tc-code-latest">Auto（智能路由）</option>
                 <option value="hy4-preview">Hy4 Preview（混元）</option>
                 <option value="hy3">Hy3（混元）</option>
-                <option value="deepseek-v4-pro-202606">DeepSeek V4 Pro</option>
-                <option value="deepseek-v4-flash-202605">DeepSeek V4 Flash</option>
+                <option value="deepseek/deepseek-flash">DeepSeek V4.1 Flash（最新）</option>
+                <option value="deepseek-v4-pro-202606">DeepSeek V4 Pro 正式版</option>
+                <option value="deepseek-v4-flash-202605">DeepSeek V4 Flash 正式版</option>
                 <option value="glm-5.3">GLM-5.3</option>
+                <option value="glm-5.3-flash">GLM-5.3-Flash</option>
+                <option value="glm-5.3-flashx">GLM-5.3-FlashX</option>
                 <option value="glm-5.2">GLM-5.2</option>
-                <option value="glm-5.1">GLM-5.1</option>
-                <option value="glm-5">GLM-5</option>
                 <option value="minimax-m3">MiniMax M3</option>
                 <option value="minimax-m2.7">MiniMax M2.7</option>
+                <option value="kimi-k3">Kimi K3</option>
+                <option value="kimi-k2.8-preview">Kimi K2.8 Preview</option>
                 <option value="kimi-k2.7-code">Kimi K2.7 Code</option>
               </optgroup>
               <optgroup label="OpenAI">
-                <option value="gpt-5.2">GPT-5.2（旗舰）</option>
-                <option value="gpt-5.1">GPT-5.1（编码）</option>
-                <option value="gpt-5">GPT-5</option>
-                <option value="gpt-5-mini">GPT-5 Mini</option>
-                <option value="gpt-5-nano">GPT-5 Nano</option>
+                <option value="gpt-6-astra">GPT-6 Astra（最新旗舰）</option>
+                <option value="gpt-5.6-sol">GPT-5.6 Sol</option>
+                <option value="gpt-5.6-terra">GPT-5.6 Terra</option>
+                <option value="gpt-5.6-luna">GPT-5.6 Luna</option>
+                <option value="gpt-5.5">GPT-5.5</option>
+                <option value="gpt-5.4">GPT-5.4</option>
+                <option value="gpt-5.4-mini">GPT-5.4 Mini</option>
+                <option value="gpt-5.4-nano">GPT-5.4 Nano</option>
+                <option value="gpt-5.2">GPT-5.2（旧版）</option>
+                <option value="gpt-5.1">GPT-5.1（旧版）</option>
               </optgroup>
               <optgroup label="Anthropic Claude">
                 <option value="claude-fable-5">Claude Fable 5（最强）</option>
@@ -236,8 +274,8 @@
                 <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5</option>
               </optgroup>
               <optgroup label="DeepSeek">
+                <option value="deepseek-flash">DeepSeek V4.1 Flash（最新）</option>
                 <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
-                <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
               </optgroup>
               <optgroup label="通义千问">
                 <option value="qwen3.8-max">通义千问 3.8-Max</option>
@@ -254,7 +292,11 @@
         <div class="form-group" style="margin-top:20px;">
           <label for="selectionReasoningEffort">划词思考强度</label>
           <input type="text" id="selectionReasoningEffort" class="form-input" list="reasoningEffortOptions" placeholder="默认 no_think">
-          <p class="form-hint">划词默认 <code>no_think</code>（不思考，最快）。留空 = 不发送该参数；也可填 <code>minimal</code> / <code>low</code> / <code>medium</code> / <code>high</code> 或任意值。划词面板顶部也能直接调。</p>
+          <p class="form-hint">
+            划词默认 <code>no_think</code>（不思考，最快）。留空 = 不发送该参数。<br>
+            Claude 端点可填 <code>low</code> / <code>medium</code> / <code>high</code> / <code>xhigh</code> / <code>max</code>（low 仍视为不思考）；
+            OpenAI 端点可填 <code>minimal</code> / <code>low</code> / <code>medium</code> / <code>high</code>。划词面板顶部也能直接调。
+          </p>
         </div>
 
         <div class="form-group" style="margin-top:20px;">

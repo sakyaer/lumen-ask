@@ -76,24 +76,28 @@ async function runThinkTest({ cfg, model, prompt }) {
   // 各家关闭思考的字段名都不一样，把已知可能一次列全，用实测筛出真正生效的那个
   const variants = isAnthropic
     ? [
-        { name: '基准（不传 thinking）', params: {} },
-        { name: 'thinking={type:disabled}', params: { thinking: { type: 'disabled' } } },
-        { name: 'thinking budget=0', params: { thinking: { type: 'enabled', budget_tokens: 0 } } },
+        { name: '基准（不传 thinking）', params: {}, kind: 'base' },
+        { name: 'thinking={type:disabled}', params: { thinking: { type: 'disabled' } }, kind: 'off' },
+        { name: 'thinking budget=0', params: { thinking: { type: 'enabled', budget_tokens: 0 } }, kind: 'off' },
+        // 新版 Claude 的思考档位：adaptive + effort（体检用中档，避免 max 太久）
+        { name: 'adaptive effort=medium', params: { thinking: { type: 'adaptive' }, output_config: { effort: 'medium' } }, kind: 'on' },
+        { name: 'budget=1024（旧版 Claude）', params: { thinking: { type: 'enabled', budget_tokens: 1024 } }, kind: 'on' },
       ]
     : [
-        { name: '基准（不传思考参数）', params: {} },
-        { name: 'reasoning_effort=no_think', params: { reasoning_effort: 'no_think' } },
-        { name: 'reasoningEffort=no_think（驼峰）', params: { reasoningEffort: 'no_think' } },
-        { name: 'enable_thinking=false', params: { enable_thinking: false } },
-        { name: 'thinking={type:disabled}', params: { thinking: { type: 'disabled' } } },
-        { name: 'thinking_budget=0', params: { thinking_budget: 0 } },
+        { name: '基准（不传思考参数）', params: {}, kind: 'base' },
+        { name: 'reasoning_effort=no_think', params: { reasoning_effort: 'no_think' }, kind: 'off' },
+        { name: 'reasoningEffort=no_think（驼峰）', params: { reasoningEffort: 'no_think' }, kind: 'off' },
+        { name: 'enable_thinking=false', params: { enable_thinking: false }, kind: 'off' },
+        { name: 'thinking={type:disabled}', params: { thinking: { type: 'disabled' } }, kind: 'off' },
+        { name: 'thinking_budget=0', params: { thinking_budget: 0 }, kind: 'off' },
       ];
 
   const doFetch = (params) => {
     if (isAnthropic) {
       const body = {
         model: useModel,
-        max_tokens: 400,
+        // 1024 是 thinking.budget_tokens 的下限，max_tokens 必须比它大，否则测不出"参数被拒"以外的信息
+        max_tokens: 2048,
         stream: false,
         messages: messages.map(m => ({ role: m.role, content: [{ type: 'text', text: m.content }] })),
         ...params,
@@ -134,7 +138,9 @@ async function runThinkTest({ cfg, model, prompt }) {
         if (isAnthropic) {
           const blocks = Array.isArray(j.content) ? j.content : [];
           content = blocks.filter(b => b.type === 'text').map(b => b.text || '').join('');
-          reasoning = blocks.filter(b => b.type === 'thinking').map(b => b.thinking || '').join('');
+          // 新版 Claude 可能只回 redacted_thinking（加密的思考块），也要算作"仍在思考"
+          reasoning = blocks.filter(b => b.type === 'thinking' || b.type === 'redacted_thinking')
+            .map(b => b.thinking || b.data || '').join('');
           finish = j.stop_reason || '';
         } else {
           const c = j.choices?.[0] || {};
@@ -145,6 +151,20 @@ async function runThinkTest({ cfg, model, prompt }) {
       } catch {
         apiError = text.slice(0, 200);
       }
+      const hasThinkingBlocks = reasoning.length > 0;
+      let verdict;
+      if (!resp.ok || apiError) {
+        verdict = '❌ 参数被拒';
+      } else if (v.kind === 'off') {
+        // 思考吃光 max_tokens 时 contentLen=0，不能算"关掉了思考"
+        verdict = !hasThinkingBlocks && content.length
+          ? '✅ 关掉了思考'
+          : (hasThinkingBlocks ? '仍有思考' : '⚠ 无正文（疑似被思考吃光额度）');
+      } else {
+        verdict = hasThinkingBlocks
+          ? '✅ 思考生效（可按需调档）'
+          : (content.length ? '无思考过程' : '⚠ 无正文');
+      }
       results.push({
         variant: v.name,
         httpStatus: resp.status,
@@ -152,9 +172,7 @@ async function runThinkTest({ cfg, model, prompt }) {
         reasoningLen: reasoning.length,
         contentLen: content.length,
         finishReason: finish,
-        verdict: resp.ok && !reasoning.length && content.length
-          ? '✅ 关掉了思考'
-          : (apiError ? '❌ 参数被拒' : (reasoning.length ? '仍有思考' : '')),
+        verdict,
         error: apiError,
       });
     } catch (e) {
@@ -201,12 +219,12 @@ function readWithTimeout(reader, ms, isFirst) {
 // 思考强度：值各家不同（腾讯认 no_think，OpenAI 系认 low/minimal）
 function normalizeReasoningEffort(baseUrl, value) {
   if (!value) return null;
-  const u = String(baseUrl || '').toLowerCase();
-  const isTencent = u.includes('lkeap') || u.includes('tencentmaas') ||
-                    u.includes('tencent') || u.includes('hunyuan');
-  if (isTencent) return value;
-  if (value === 'no_think') return 'low';
-  return value;
+  const v = String(value).trim().toLowerCase();
+  if (isTencentBase(baseUrl)) return v;
+  // minimal 是 OpenAI 的档位，Anthropic 没有；两者都当"最浅"处理
+  if (v === 'no_think') return 'low';
+  if (v === 'minimal') return 'low';
+  return v;
 }
 
 function isTencentBase(baseUrl) {
@@ -215,7 +233,59 @@ function isTencentBase(baseUrl) {
          u.includes('tencent') || u.includes('hunyuan');
 }
 
+// Anthropic 的思考深度（output_config.effort）：low / medium / high / xhigh / max
+// 旧档位别名一律拉到 low，否则会被网关当成非法值报 400
+const ANTHROPIC_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const ANTHROPIC_EFFORT_ALIAS = {
+  minimal: 'low', lowest: 'low', none: 'low', off: 'low', light: 'low',
+  mid: 'medium', normal: 'medium', default: 'medium',
+  deep: 'high', deeper: 'xhigh', deeperer: 'xhigh', ultra: 'max', ultrathink: 'max',
+};
+
+function anthropicEffortValue(v) {
+  if (ANTHROPIC_EFFORT_LEVELS.includes(v)) return v;
+  return ANTHROPIC_EFFORT_ALIAS[v] || 'high';
+}
+
+// 旧版 Anthropic 只认 budget_tokens，给每个档位一个合理的显式预算
+// （必须 >= 1024 且 < max_tokens，max_tokens 过小时 sendWithReasoning 会自动退到下一组）
+const ANTHROPIC_BUDGET = { low: 1024, medium: 2048, high: 4096, xhigh: 8192, max: 16384 };
+
+// 明知道自己不吃 budget_tokens 的新模型（Opus 5 / Fable 5 / Sonnet 5 等）先试 adaptive，
+// 免得白白多发一次注定 400 的请求；老模型（Haiku 4.5 等）反过来先试 budget_tokens。
+const ANTHROPIC_ADAPTIVE_MODEL = /(opus|sonnet)-5|fable-5|opus-4-(6|7|8)|sonnet-4-6|mythos/i;
+
+function anthropicCandidates(model, effort) {
+  const v = normalizeReasoningEffort('', effort);
+  if (!v) return [{ label: 'none', params: {} }];
+  // normalizeReasoningEffort 已把 no_think / minimal 归一到 low
+  const effortValue = anthropicEffortValue(v);
+
+  // 关闭思考：新老模型都认 disabled；老的还认 budget_tokens:0
+  if (v === 'no_think' || v === 'minimal' || v === 'low') {
+    return [
+      { label: 'thinking:disabled', params: { thinking: { type: 'disabled' } } },
+      { label: 'thinking-budget-0', params: { thinking: { type: 'enabled', budget_tokens: 0 } } },
+    ];
+  }
+
+  // 新版：thinking.type=adaptive + output_config.effort（闭区间，不传 budget_tokens）
+  const adaptive = {
+    label: `adaptive-effort:${effortValue}`,
+    params: { thinking: { type: 'adaptive' }, output_config: { effort: effortValue } },
+  };
+  // 旧版：thinking.type=enabled + budget_tokens（必须 >= 1024 且 < max_tokens）
+  const legacy = {
+    label: `legacy-budget:${effortValue}`,
+    params: { thinking: { type: 'enabled', budget_tokens: ANTHROPIC_BUDGET[effortValue] || 1024 } },
+  };
+
+  return ANTHROPIC_ADAPTIVE_MODEL.test(String(model || '')) ? [adaptive, legacy] : [legacy, adaptive];
+}
+
 // 关闭思考的写法各家完全不同，不再猜 —— 按"一次命中率"排序列出所有候选：
+//   Anthropic 系：thinking:{type:"adaptive"|"disabled"} + output_config.effort，
+//                 旧模型退回 thinking:{type:"enabled", budget_tokens:N}
 //   GLM / 智谱系：thinking:{type:"disabled"}
 //   Qwen / vLLM 系：enable_thinking:false
 //   OpenAI 系：reasoning_effort:low
@@ -223,25 +293,14 @@ function isTencentBase(baseUrl) {
 //   通用兜底：thinking_budget:0
 // 宽松网关会忽略无关字段，所以第一组"全带上"通常一次命中；
 // 严格网关会对未知字段报 400，那就逐组退到能用的那一组（400 返回很快，开销可接受）。
-function reasoningCandidates(baseUrl, effort, isAnthropic) {
+function reasoningCandidates(baseUrl, effort, isAnthropic, model) {
   const v = normalizeReasoningEffort(baseUrl, effort);
   if (!v) return [{ label: 'none', params: {} }];
 
+  if (isAnthropic) return anthropicCandidates(model, effort);
+
   const isTencent = isTencentBase(baseUrl);
   const isLow = v === 'no_think' || v === 'minimal' || v === 'low';
-
-  if (isAnthropic) {
-    if (isLow) {
-      return [
-        { label: 'thinking:disabled', params: { thinking: { type: 'disabled' } } },
-        { label: 'thinking-budget-0', params: { thinking: { type: 'enabled', budget_tokens: 0 } } },
-      ];
-    }
-    return [{
-      label: 'thinking:enabled',
-      params: { thinking: { type: 'enabled', budget_tokens: v === 'high' ? 2048 : 1024 } },
-    }];
-  }
 
   if (isLow) {
     const allOff = {
@@ -280,9 +339,9 @@ function httpErrMsg(status, text) {
 }
 
 // 依次尝试候选参数组合，返回第一个能通的响应
-async function sendWithReasoning(doFetch, baseUrl, effort, isAnthropic) {
-  const cands = reasoningCandidates(baseUrl, effort, isAnthropic);
-  const key = `${baseUrl}|${effort || ''}|${isAnthropic ? 'a' : 'o'}`;
+async function sendWithReasoning(doFetch, baseUrl, effort, isAnthropic, model) {
+  const cands = reasoningCandidates(baseUrl, effort, isAnthropic, model);
+  const key = `${baseUrl}|${model || ''}|${effort || ''}|${isAnthropic ? 'a' : 'o'}`;
 
   const order = [];
   const cached = paramProfile.get(key);
@@ -329,7 +388,9 @@ function handleNonStreamBody(text, isAnthropic, send) {
     if (isAnthropic) {
       const blocks = Array.isArray(j.content) ? j.content : [];
       content = blocks.filter(b => b.type === 'text').map(b => b.text || '').join('');
-      reasoning = blocks.filter(b => b.type === 'thinking').map(b => b.thinking || '').join('');
+      // redacted_thinking：加密的思考块，同样算"只思考没正文"的兜底内容
+      reasoning = blocks.filter(b => b.type === 'thinking' || b.type === 'redacted_thinking')
+        .map(b => b.thinking || b.data || '').join('');
     } else {
       const choice = j.choices?.[0] || {};
       content = choice.message?.content || choice.text || '';
@@ -426,7 +487,8 @@ async function handleStreamChat(payload, tabId, requestId) {
       (params) => buildRequest(params),
       baseUrl,
       cfg.reasoningEffort,
-      isAnthropic
+      isAnthropic,
+      cfg.model
     );
     if (sent.error) {
       send({ error: sent.error });

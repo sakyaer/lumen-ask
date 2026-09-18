@@ -148,9 +148,12 @@ saveBtn.addEventListener('click', async () => {
     return;
   }
 
-  const reasoningEffort = reasoningEffortInput ? reasoningEffortInput.value : '';
+  // 值可能带空格（从别处粘进来的），trim 后再存，避免 " high" 这类非法参数被原样发出去
+  const reasoningEffort = reasoningEffortInput ? reasoningEffortInput.value.trim() : '';
 
-  const selectionReasoningEffort = selectionReasoningEffortInput ? selectionReasoningEffortInput.value : 'no_think';
+  const selectionReasoningEffort = selectionReasoningEffortInput
+    ? selectionReasoningEffortInput.value.trim()
+    : 'no_think';
 
   const panelWidth = Math.min(Math.max(parseInt(panelWidthInput.value) || 468, 320), 800);
   const replyHeight = Math.min(Math.max(parseInt(replyHeightInput.value) || 288, 120), 800);

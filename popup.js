@@ -13,11 +13,16 @@ const MODEL_GROUPS = [
     label: 'OpenAI',
     match: cfg => !cfg.baseUrl || cfg.baseUrl.includes('openai.com'),
     models: [
-      { id: 'gpt-5.2',    name: 'GPT-5.2（旗舰）' },
-      { id: 'gpt-5.1',    name: 'GPT-5.1（编码）' },
-      { id: 'gpt-5',      name: 'GPT-5' },
-      { id: 'gpt-5-mini', name: 'GPT-5 Mini' },
-      { id: 'gpt-5-nano', name: 'GPT-5 Nano' },
+      { id: 'gpt-6-astra',   name: 'GPT-6 Astra（最新旗舰）' },
+      { id: 'gpt-5.6-sol',   name: 'GPT-5.6 Sol' },
+      { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
+      { id: 'gpt-5.6-luna',  name: 'GPT-5.6 Luna' },
+      { id: 'gpt-5.5',       name: 'GPT-5.5' },
+      { id: 'gpt-5.4',       name: 'GPT-5.4' },
+      { id: 'gpt-5.4-mini',  name: 'GPT-5.4 Mini' },
+      { id: 'gpt-5.4-nano',  name: 'GPT-5.4 Nano' },
+      { id: 'gpt-5.2',       name: 'GPT-5.2（旧版）' },
+      { id: 'gpt-5.1',       name: 'GPT-5.1（旧版）' },
     ]
   },
   {
@@ -37,25 +42,31 @@ const MODEL_GROUPS = [
       { id: 'tc-code-latest',             name: 'Auto（智能路由）' },
       // 通用 Token Plan
       { id: 'hy4-preview',                name: 'Hy4 Preview（混元）' },
-      { id: 'deepseek-v4-pro-202606',     name: 'DeepSeek V4 Pro' },
-      { id: 'deepseek-v4-flash-202605',   name: 'DeepSeek V4 Flash' },
+      { id: 'deepseek/deepseek-flash',    name: 'DeepSeek V4.1 Flash（最新）' },
+      { id: 'deepseek-v4-pro-202606',     name: 'DeepSeek V4 Pro 正式版' },
+      { id: 'deepseek-v4-flash-202605',   name: 'DeepSeek V4 Flash 正式版' },
       { id: 'glm-5.3',                    name: 'GLM-5.3' },
+      { id: 'glm-5.3-flash',              name: 'GLM-5.3-Flash' },
+      { id: 'glm-5.3-flashx',             name: 'GLM-5.3-FlashX' },
       { id: 'glm-5.2',                    name: 'GLM-5.2' },
-      { id: 'glm-5.1',                    name: 'GLM-5.1' },
-      { id: 'glm-5',                      name: 'GLM-5' },
       { id: 'minimax-m3',                 name: 'MiniMax M3' },
       { id: 'minimax-m2.7',               name: 'MiniMax M2.7' },
+      { id: 'kimi-k3',                    name: 'Kimi K3' },
+      { id: 'kimi-k2.8-preview',          name: 'Kimi K2.8 Preview' },
       { id: 'kimi-k2.7-code',             name: 'Kimi K2.7 Code' },
       // Hy Token Plan
       { id: 'hy3',                        name: 'Hy3（混元）' },
+      // 2026-10 下线，保留给老配置
+      { id: 'glm-5.1',                    name: 'GLM-5.1（旧）' },
+      { id: 'glm-5',                      name: 'GLM-5（旧）' },
     ]
   },
   {
     label: 'DeepSeek',
     match: cfg => cfg.baseUrl && cfg.baseUrl.includes('deepseek'),
     models: [
-      { id: 'deepseek-v4-pro',   name: 'V4 Pro' },
-      { id: 'deepseek-v4-flash', name: 'V4 Flash' },
+      { id: 'deepseek-flash', name: 'V4.1 Flash（最新）' },
+      { id: 'deepseek-v4-pro', name: 'V4 Pro' },
     ]
   },
   {
@@ -433,9 +444,12 @@ function readWithTimeout(reader, ms, isFirst) {
 // 思考强度：腾讯系认 no_think，OpenAI 系只认 low/minimal
 function normalizeReasoningEffort(baseUrl, value) {
   if (!value) return null;
-  if (isTencentBase(baseUrl)) return value;
-  if (value === 'no_think') return 'low';
-  return value;
+  const v = String(value).trim().toLowerCase();
+  if (isTencentBase(baseUrl)) return v;
+  // minimal 是 OpenAI 的档位，Anthropic 没有；两者都当"最浅"处理
+  if (v === 'no_think') return 'low';
+  if (v === 'minimal') return 'low';
+  return v;
 }
 
 function isTencentBase(baseUrl) {
@@ -444,28 +458,68 @@ function isTencentBase(baseUrl) {
          u.includes('tencent') || u.includes('hunyuan');
 }
 
+// Anthropic 的思考深度（output_config.effort）：low / medium / high / xhigh / max
+// 旧档位别名一律拉到 low，否则会被网关当成非法值报 400
+const ANTHROPIC_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const ANTHROPIC_EFFORT_ALIAS = {
+  minimal: 'low', lowest: 'low', none: 'low', off: 'low', light: 'low',
+  mid: 'medium', normal: 'medium', default: 'medium',
+  deep: 'high', deeper: 'xhigh', deeperer: 'xhigh', ultra: 'max', ultrathink: 'max',
+};
+
+function anthropicEffortValue(v) {
+  if (ANTHROPIC_EFFORT_LEVELS.includes(v)) return v;
+  return ANTHROPIC_EFFORT_ALIAS[v] || 'high';
+}
+
+// 旧版 Anthropic 只认 budget_tokens，给每个档位一个合理的显式预算
+// （必须 >= 1024 且 < max_tokens，max_tokens 过小时 sendWithReasoning 会自动退到下一组）
+const ANTHROPIC_BUDGET = { low: 1024, medium: 2048, high: 4096, xhigh: 8192, max: 16384 };
+
+// 明知道自己不吃 budget_tokens 的新模型（Opus 5 / Fable 5 / Sonnet 5 等）先试 adaptive，
+// 免得白白多发一次注定 400 的请求；老模型（Haiku 4.5 等）反过来先试 budget_tokens。
+const ANTHROPIC_ADAPTIVE_MODEL = /(opus|sonnet)-5|fable-5|opus-4-(6|7|8)|sonnet-4-6|mythos/i;
+
+function anthropicCandidates(model, effort) {
+  const v = normalizeReasoningEffort('', effort);
+  if (!v) return [{ label: 'none', params: {} }];
+  // normalizeReasoningEffort 已把 no_think / minimal 归一到 low
+  const effortValue = anthropicEffortValue(v);
+
+  // 关闭思考：新老模型都认 disabled；老的还认 budget_tokens:0
+  if (v === 'no_think' || v === 'minimal' || v === 'low') {
+    return [
+      { label: 'thinking:disabled', params: { thinking: { type: 'disabled' } } },
+      { label: 'thinking-budget-0', params: { thinking: { type: 'enabled', budget_tokens: 0 } } },
+    ];
+  }
+
+  // 新版：thinking.type=adaptive + output_config.effort（闭区间，不传 budget_tokens）
+  const adaptive = {
+    label: `adaptive-effort:${effortValue}`,
+    params: { thinking: { type: 'adaptive' }, output_config: { effort: effortValue } },
+  };
+  // 旧版：thinking.type=enabled + budget_tokens（必须 >= 1024 且 < max_tokens）
+  const legacy = {
+    label: `legacy-budget:${effortValue}`,
+    params: { thinking: { type: 'enabled', budget_tokens: ANTHROPIC_BUDGET[effortValue] || 1024 } },
+  };
+
+  return ANTHROPIC_ADAPTIVE_MODEL.test(String(model || '')) ? [adaptive, legacy] : [legacy, adaptive];
+}
+
 // 关闭思考的写法各家不同，按"一次命中率"排序列出所有候选（与 background.js 保持一致）：
+// Anthropic 系 thinking:{type:"adaptive"|"disabled"}+output_config.effort（旧模型退回 budget_tokens）/
 // GLM 系 thinking:{type:"disabled"} / Qwen 系 enable_thinking:false /
 // OpenAI 系 reasoning_effort:low / 腾讯文档 reasoningEffort（驼峰）/ 兜底 thinking_budget:0
-function reasoningCandidates(baseUrl, effort, isAnthropic) {
+function reasoningCandidates(baseUrl, effort, isAnthropic, model) {
   const v = normalizeReasoningEffort(baseUrl, effort);
   if (!v) return [{ label: 'none', params: {} }];
 
+  if (isAnthropic) return anthropicCandidates(model, effort);
+
   const isTencent = isTencentBase(baseUrl);
   const isLow = v === 'no_think' || v === 'minimal' || v === 'low';
-
-  if (isAnthropic) {
-    if (isLow) {
-      return [
-        { label: 'thinking:disabled', params: { thinking: { type: 'disabled' } } },
-        { label: 'thinking-budget-0', params: { thinking: { type: 'enabled', budget_tokens: 0 } } },
-      ];
-    }
-    return [{
-      label: 'thinking:enabled',
-      params: { thinking: { type: 'enabled', budget_tokens: v === 'high' ? 2048 : 1024 } },
-    }];
-  }
 
   if (isLow) {
     const allOff = {
@@ -502,9 +556,9 @@ function httpErrMsg(status, text) {
   return String(msg);
 }
 
-async function sendWithReasoning(doFetch, baseUrl, effort, isAnthropic) {
-  const cands = reasoningCandidates(baseUrl, effort, isAnthropic);
-  const key = `${baseUrl}|${effort || ''}|${isAnthropic ? 'a' : 'o'}`;
+async function sendWithReasoning(doFetch, baseUrl, effort, isAnthropic, model) {
+  const cands = reasoningCandidates(baseUrl, effort, isAnthropic, model);
+  const key = `${baseUrl}|${model || ''}|${effort || ''}|${isAnthropic ? 'a' : 'o'}`;
 
   const order = [];
   const cached = paramProfile.get(key);
@@ -571,7 +625,7 @@ async function streamChatOpenAI(cfg, baseUrl, messages, h) {
     });
   };
 
-  const resp = await sendWithReasoning(doFetch, baseUrl, cfg.reasoningEffort, false);
+  const resp = await sendWithReasoning(doFetch, baseUrl, cfg.reasoningEffort, false, cfg.model);
   if (!resp.ok) throw new Error(httpErrMsg(resp.status, await resp.text()));
 
   if (h.onStatus) h.onStatus('connected');
@@ -709,7 +763,7 @@ async function streamChatAnthropic(cfg, baseUrl, messages, h) {
     });
   };
 
-  const resp = await sendWithReasoning(doFetch, baseUrl, cfg.reasoningEffort, true);
+  const resp = await sendWithReasoning(doFetch, baseUrl, cfg.reasoningEffort, true, cfg.model);
   if (!resp.ok) throw new Error(httpErrMsg(resp.status, await resp.text()));
 
   if (h.onStatus) h.onStatus('connected');

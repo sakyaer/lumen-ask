@@ -110,42 +110,33 @@
     floatBtn = document.createElement('div');
     floatBtn.id = '__llm_float_btn';
     floatBtn.innerHTML = `
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-        <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" fill="white"/>
-        <circle cx="9" cy="11" r="1.2" fill="url(#fb1)"/>
-        <circle cx="12" cy="11" r="1.2" fill="url(#fb1)"/>
-        <circle cx="15" cy="11" r="1.2" fill="url(#fb1)"/>
-        <defs>
-          <linearGradient id="fb1" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stop-color="#6366F1"/>
-            <stop offset="100%" stop-color="#8B5CF6"/>
-          </linearGradient>
-        </defs>
-      </svg>
+      <img src="${chrome.runtime.getURL('icons/icon48.png')}" width="36" height="36" alt="" aria-hidden="true">
     `;
     Object.assign(floatBtn.style, {
       position: 'absolute',
       zIndex: '2147483646',
-      width: '30px',
-      height: '30px',
-      background: 'linear-gradient(135deg, #6366F1, #8B5CF6)',
-      borderRadius: '8px',
+      width: '36px',
+      height: '36px',
+      background: 'transparent',
+      border: '0',
+      borderRadius: '12px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       cursor: 'pointer',
-      boxShadow: '0 4px 16px rgba(99,102,241,0.5)',
-      transition: 'transform 0.2s, box-shadow 0.2s',
+      boxShadow: 'none',
+      filter: 'drop-shadow(0 7px 10px rgba(25,20,96,0.34))',
+      transition: 'transform 0.18s ease, filter 0.18s ease',
       userSelect: 'none',
     });
 
     floatBtn.addEventListener('mouseenter', () => {
-      floatBtn.style.transform = 'scale(1.1)';
-      floatBtn.style.boxShadow = '0 6px 24px rgba(99,102,241,0.7)';
+      floatBtn.style.transform = 'translateY(-1px) scale(1.06)';
+      floatBtn.style.filter = 'drop-shadow(0 10px 14px rgba(25,20,96,0.44)) brightness(1.05)';
     });
     floatBtn.addEventListener('mouseleave', () => {
       floatBtn.style.transform = 'scale(1)';
-      floatBtn.style.boxShadow = '0 4px 16px rgba(99,102,241,0.5)';
+      floatBtn.style.filter = 'drop-shadow(0 7px 10px rgba(25,20,96,0.34))';
     });
     floatBtn.addEventListener('mousedown', e => e.stopPropagation());
     floatBtn.addEventListener('click', e => {
@@ -229,6 +220,26 @@
     return Number.isFinite(h) && h >= 120 ? Math.min(h, 800) : 288;
   }
 
+  // 「配置」浮层：模型 / 思考深度都收在这里，避免常驻占地方
+  function setConfigMenuOpen(open) {
+    if (!shadowRoot) return;
+    const menu = shadowRoot.getElementById('config-menu');
+    const btn = shadowRoot.getElementById('config-btn');
+    if (btn) btn.classList.toggle('active', !!open);
+    if (!menu) return;
+    if (!open) { menu.style.display = 'none'; return; }
+
+    menu.style.display = 'flex';
+    if (!btn || !shadowHost) return;
+    // 右对齐「配置」按钮、向下展开；下方空间不够就翻到按钮上方
+    const b = btn.getBoundingClientRect();
+    const host = shadowHost.getBoundingClientRect();
+    menu.style.left = Math.max(6, b.right - host.left - menu.offsetWidth) + 'px';
+    const below = b.bottom - host.top + 8;
+    const flip = b.bottom + 8 + menu.offsetHeight > window.innerHeight;
+    menu.style.top = (flip ? Math.max(6, b.top - host.top - menu.offsetHeight - 8) : below) + 'px';
+  }
+
   function showPanel() {
     createPanelIfNeeded();
 
@@ -244,8 +255,8 @@
       rect = { right: lastPointer.x, bottom: lastPointer.y, top: lastPointer.y, left: lastPointer.x };
     }
     const panelW = getPanelWidth();
-    // 高度估算：回答区之外的部分（标题/选区/控件/按钮）约占 280px
-    const panelH = 280 + getReplyHeight();
+    // 高度估算：回答区之外的部分（标题/工具栏/输入区/保存按钮）约占 240px
+    const panelH = 240 + getReplyHeight();
     const vpW = window.innerWidth, vpH = window.innerHeight;
 
     let left = rect.right + window.scrollX - panelW;
@@ -260,9 +271,17 @@
     shadowHost.style.top = top + 'px';
     shadowHost.style.display = 'block';
 
-    // Fill selection preview
-    const preview = shadowRoot.getElementById('sel-preview');
-    if (preview) preview.textContent = currentSelection.slice(0, 200) + (currentSelection.length > 200 ? '…' : '');
+    // 标题即划词原文（最多两行，悬停可看全文）
+    const titleEl = shadowRoot.getElementById('panel-title-text');
+    if (titleEl) {
+      titleEl.textContent = currentSelection.replace(/\s+/g, ' ').trim() || '划词提问';
+      titleEl.title = currentSelection;
+    }
+
+    // 「体检」默认隐藏，每次打开面板都收起（右键「配置」可显隐）；配置浮层也收起
+    const thinkTestBtn = shadowRoot.getElementById('panel-think-test');
+    if (thinkTestBtn) thinkTestBtn.classList.remove('is-visible');
+    setConfigMenuOpen(false);
 
     // 渲染快捷按钮（使用缓存配置，无需 async）
     renderPresetButtons(cachedConfig);
@@ -294,6 +313,7 @@
 
   function hidePanel() {
     if (!shadowHost) return;
+    setConfigMenuOpen(false);
     const panel = shadowRoot.getElementById('panel');
     if (panel) {
       panel.style.opacity = '0';
@@ -310,48 +330,31 @@
       <div id="panel">
         <div class="panel-header">
           <div class="panel-title">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" fill="url(#ph1)"/>
-              <defs>
-                <linearGradient id="ph1" x1="0" y1="0" x2="24" y2="24" gradientUnits="userSpaceOnUse">
-                  <stop offset="0%" stop-color="#6366F1"/>
-                  <stop offset="100%" stop-color="#8B5CF6"/>
-                </linearGradient>
-              </defs>
-            </svg>
-            Lumen Ask
+            <img class="lumen-icon" src="${chrome.runtime.getURL('icons/icon32.png')}" width="19" height="19" alt="" aria-hidden="true">
+            <span class="panel-title-text" id="panel-title-text"></span>
           </div>
-          <button class="close-btn" id="close-btn">×</button>
+          <div class="header-actions">
+            <div class="config-wrap" id="config-wrap">
+              <button class="config-btn" id="config-btn" title="切换模型 / 思考深度">配置</button>
+            </div>
+            <button class="close-btn" id="close-btn">×</button>
+          </div>
         </div>
 
-        <div class="sel-preview-wrap">
-          <div id="sel-preview" class="sel-preview"></div>
-        </div>
-
-        <div class="panel-controls">
-          <label class="ctrl">
-            <span class="ctrl-label">模型</span>
-            <select id="panel-model-select" class="panel-select" title="划词使用的模型"></select>
-          </label>
-          <label class="ctrl">
-            <span class="ctrl-label">思考</span>
-            <select id="panel-think-select" class="panel-select" title="划词的思考强度"></select>
-          </label>
-          <button id="panel-think-test" class="panel-mini-btn" title="实测哪个思考参数真正生效">体检</button>
-        </div>
-
-        <div class="preset-btns" id="preset-btns">
-          <!-- 由配置动态渲染 -->
-        </div>
-
-        <div class="custom-area">
-          <input type="text" id="custom-input" class="custom-input" placeholder="输入自定义问题...">
-          <button class="send-btn" id="send-btn">
-            <svg id="send-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <line x1="22" y1="2" x2="11" y2="13"></line>
-              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-            </svg>
-          </button>
+        <div class="panel-toolbar" id="panel-toolbar">
+          <div class="preset-btns" id="preset-btns">
+            <!-- 由配置动态渲染 -->
+          </div>
+          <span class="toolbar-divider" aria-hidden="true"></span>
+          <div class="custom-area">
+            <input type="text" id="custom-input" class="custom-input" placeholder="输入自定义问题...">
+            <button class="send-btn" id="send-btn">
+              <svg id="send-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div id="reply-area" class="reply-area" style="display:none;">
@@ -361,18 +364,31 @@
               <div class="dot-pulse"></div>
             </div>
             <span id="reply-status" class="reply-status"></span>
+            <div id="save-session-btn" class="save-session-btn" style="display:none;">
+              <button id="btn-save-session" title="点击打开 Popup 继续对话">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"></path>
+                </svg>
+                打开 Popup 继续对话
+              </button>
+            </div>
           </div>
           <div id="reply-content" class="reply-content"></div>
         </div>
+      </div>
 
-        <div id="save-session-btn" class="save-session-btn" style="display:none;">
-          <button id="btn-save-session">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"></path>
-            </svg>
-            打开 Popup 继续对话
-          </button>
-        </div>
+      <!-- 「配置」浮层挂在 #panel 外面：面板是 overflow:hidden，放里面会被裁掉 -->
+      <div class="config-menu" id="config-menu" style="display:none;">
+        <div class="config-menu-title">本次划词使用</div>
+        <label class="ctrl">
+          <span class="ctrl-label">模型</span>
+          <select id="panel-model-select" class="panel-select" title="划词使用的模型"></select>
+        </label>
+        <label class="ctrl">
+          <span class="ctrl-label">思考深度</span>
+          <select id="panel-think-select" class="panel-select" title="划词的思考强度"></select>
+        </label>
+        <button id="panel-think-test" class="panel-mini-btn" title="实测哪个思考参数真正生效（默认隐藏，右键此处可显隐）">体检</button>
       </div>
     `;
   }
@@ -424,27 +440,108 @@
         display: flex;
         align-items: center;
         gap: 7px;
+        flex: 1;
+        min-width: 0;
         font-size: 13px;
         font-weight: 800;
         color: #46A302;
       }
-      /* 面板内直接调模型与思考强度 */
-      .panel-controls {
+      .panel-title .lumen-icon {
+        flex-shrink: 0;
+        display: block;
+        filter: drop-shadow(0 2px 3px rgba(37,31,118,0.2));
+      }
+      /* 标题直接显示划词原文，最多两行，全文见 title 提示 */
+      .panel-title-text {
+        min-width: 0;
+        font-size: 12px;
+        font-weight: 800;
+        line-height: 1.45;
+        color: #3C3C3C;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        word-break: break-word;
+      }
+
+      /* 头部右侧：配置 + 关闭 */
+      .header-actions {
         display: flex;
         align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+      }
+      .config-wrap { flex-shrink: 0; }
+      .config-btn {
+        font-size: 10px;
+        font-weight: 800;
+        font-family: inherit;
+        color: #3C3C3C;
+        background: #FFFFFF;
+        border: 2px solid #AFAFAF;
+        border-radius: 8px;
+        padding: 3px 9px;
+        cursor: pointer;
+        box-shadow: 0 2px 0 #AFAFAF;
+        transition: all 0.15s;
+      }
+      .config-btn:hover { background: #F0F0F0; }
+      .config-btn.active {
+        background: #E8F4FF;
+        border-color: #1CB0F6;
+        color: #0090D4;
+        box-shadow: 0 2px 0 #0090D4;
+      }
+      /* 挂在 #panel 外面（面板 overflow:hidden 会裁掉浮层），位置由 JS 按「配置」按钮算 */
+      .config-menu {
+        position: absolute;
+        top: 0;
+        left: 0;
+        z-index: 50;
+        display: flex;
+        flex-direction: column;
         gap: 8px;
-        padding: 8px 14px;
+        min-width: 236px;
+        padding: 10px;
+        background: #FFFFFF;
+        border: 2px solid #AFAFAF;
+        border-radius: 12px;
+        box-shadow: 0 6px 0 rgba(175,175,175,0.35), 0 12px 24px rgba(0,0,0,0.14);
+      }
+      .config-menu-title {
+        font-size: 10px;
+        font-weight: 800;
+        color: #777777;
+        letter-spacing: 0.04em;
+      }
+
+      /* 一行工具栏：快捷提问按钮 ｜ 自定义问题 */
+      .panel-toolbar {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 8px 12px;
         background: #F7FBFF;
         border-bottom: 2px solid #E5E5E5;
+      }
+      .toolbar-divider {
+        flex: 0 0 auto;
+        align-self: stretch;
+        width: 2px;
+        min-height: 18px;
+        border-radius: 2px;
+        background: #E0E0E0;
       }
       .ctrl {
         display: flex;
         align-items: center;
-        gap: 4px;
-        flex: 1;
+        gap: 6px;
         min-width: 0;
       }
       .ctrl-label {
+        width: 40px;
         font-size: 10px;
         font-weight: 800;
         color: #777777;
@@ -453,14 +550,14 @@
       .panel-select {
         flex: 1;
         min-width: 0;
-        font-size: 10px;
+        font-size: 11px;
         font-weight: 700;
         font-family: inherit;
         color: #3C3C3C;
         background: #FFFFFF;
         border: 1.5px solid #AFAFAF;
         border-radius: 8px;
-        padding: 3px 4px;
+        padding: 4px 6px;
         cursor: pointer;
         outline: none;
         box-shadow: 0 2px 0 #AFAFAF;
@@ -482,6 +579,9 @@
       }
       .panel-mini-btn:hover:not(:disabled) { background: #D6ECFF; }
       .panel-mini-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+      /* 「体检」默认隐藏，右键「配置」区域可显隐 */
+      #panel-think-test { display: none; }
+      #panel-think-test.is-visible { display: inline-flex; align-items: center; align-self: flex-start; }
 
       .close-btn {
         width: 24px; height: 24px;
@@ -506,39 +606,23 @@
       }
       .close-btn:active { transform: translateY(1px); box-shadow: 0 1px 0 #AFAFAF; }
 
-      .sel-preview-wrap {
-        padding: 8px 14px;
-        background: #FFFBF0;
-        border-bottom: 2px solid #E5E5E5;
-      }
-      .sel-preview {
-        font-size: 12px;
-        font-weight: 600;
-        color: #777777;
-        font-style: italic;
-        line-height: 1.5;
-        display: -webkit-box;
-        -webkit-line-clamp: 3;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-      }
-
+      /* 与自定义输入同处一行；空间不够时输入框整体换到下一行 */
       .preset-btns {
         display: flex;
-        gap: 6px;
-        padding: 10px 14px;
-        border-bottom: 2px solid #E5E5E5;
+        align-items: center;
+        gap: 5px;
+        flex: 0 0 auto;
         flex-wrap: wrap;
       }
 
       /* 彩色预设按钮，依次绿/橙/蓝/紫 */
       .preset-btn {
-        padding: 5px 12px;
+        padding: 4px 7px;
         background: #E8F9E0;
         border: 2px solid #46A302;
         border-radius: 99px;
         color: #46A302;
-        font-size: 11px;
+        font-size: 10px;
         font-weight: 800;
         cursor: pointer;
         font-family: inherit;
@@ -562,22 +646,24 @@
         transform: none !important;
       }
 
+      /* 自定义问题：与快捷按钮同一行 */
       .custom-area {
         display: flex;
         align-items: center;
-        gap: 8px;
-        padding: 10px 14px;
-        border-bottom: 2px solid #E5E5E5;
+        gap: 6px;
+        flex: 1 1 190px;
+        min-width: 190px;
       }
 
       .custom-input {
         flex: 1;
+        min-width: 0;
         background: #F7F7F7;
         border: 2px solid #AFAFAF;
-        border-radius: 10px;
-        padding: 7px 10px;
+        border-radius: 9px;
+        padding: 5px 8px;
         color: #3C3C3C;
-        font-size: 12px;
+        font-size: 11px;
         font-weight: 700;
         font-family: inherit;
         outline: none;
@@ -592,10 +678,10 @@
       }
 
       .send-btn {
-        width: 32px; height: 32px;
+        width: 27px; height: 27px;
         background: #1CB0F6;
         border: none;
-        border-radius: 10px;
+        border-radius: 9px;
         cursor: pointer;
         color: white;
         display: flex;
@@ -603,10 +689,10 @@
         justify-content: center;
         transition: transform 0.12s, box-shadow 0.12s;
         flex-shrink: 0;
-        box-shadow: 0 4px 0 #0090D4;
+        box-shadow: 0 3px 0 #0090D4;
       }
-      .send-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 0 #0090D4; }
-      .send-btn:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 1px 0 #0090D4; }
+      .send-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 0 #0090D4; }
+      .send-btn:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 #0090D4; }
       .send-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
       .reply-area {
@@ -767,34 +853,43 @@
       .dot-pulse span:nth-child(2) { background: #FF9600; animation-delay: 0.2s; }
       .dot-pulse span:nth-child(3) { background: #1CB0F6; animation-delay: 0.4s; }
 
+      /* 保存状态按钮：跟在「AI 回复」同一行靠右，比原来小一号 */
       .save-session-btn {
-        padding: 8px 14px;
         display: flex;
-        justify-content: center;
-        background: #FFFBF0;
+        flex-shrink: 0;
+        margin-left: 2px;
       }
       .save-session-btn button {
         display: flex;
         align-items: center;
-        gap: 6px;
-        background: var(--orange, #FF9600);
+        gap: 4px;
         background: #FF9600;
-        border: 2px solid #CC7800;
-        border-radius: 10px;
+        border: 1.5px solid #CC7800;
+        border-radius: 8px;
         color: white;
-        font-size: 12px;
+        font-size: 10px;
         font-weight: 800;
         font-family: inherit;
-        padding: 7px 18px;
+        letter-spacing: 0;
+        padding: 3px 8px;
         cursor: pointer;
-        box-shadow: 0 3px 0 #CC7800;
+        box-shadow: 0 2px 0 #CC7800;
         transition: transform 0.12s, box-shadow 0.12s;
       }
-      .save-session-btn button:hover { transform: translateY(-2px); box-shadow: 0 5px 0 #CC7800; }
-      .save-session-btn button:active { transform: translateY(2px); box-shadow: 0 1px 0 #CC7800; }
+      .save-session-btn button:hover { transform: translateY(-1px); box-shadow: 0 3px 0 #CC7800; }
+      .save-session-btn button:active { transform: translateY(1px); box-shadow: 0 1px 0 #CC7800; }
+      /* 保存成功：整颗按钮转绿 + 白字（原来在橙底上把字改成绿色，糊成一片） */
+      .save-session-btn button.saved {
+        background: #58CC02;
+        border-color: #46A302;
+        color: #FFFFFF;
+        box-shadow: 0 2px 0 #46A302;
+      }
+      .save-session-btn button.saved:hover { box-shadow: 0 3px 0 #46A302; }
+      .save-session-btn button.saved:active { box-shadow: 0 1px 0 #46A302; }
 
       .spinner {
-        width: 12px; height: 12px;
+        width: 11px; height: 11px;
         border: 2px solid rgba(255,255,255,0.4);
         border-top-color: white;
         border-radius: 50%;
@@ -861,11 +956,37 @@
     if (thinkTestBtn) {
       thinkTestBtn.addEventListener('click', () => runPanelThinkTest());
     }
+
+    // 「配置」浮层：模型 / 思考深度都在里面，点其他地方自动收起
+    const configBtn = shadowRoot.getElementById('config-btn');
+    const configMenu = shadowRoot.getElementById('config-menu');
+    const configWrap = shadowRoot.getElementById('config-wrap');
+    if (configBtn && configMenu) {
+      configBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        setConfigMenuOpen(configMenu.style.display === 'none');
+      });
+    }
+    shadowRoot.addEventListener('mousedown', e => {
+      if (!configMenu || configMenu.style.display === 'none') return;
+      if (configWrap && configWrap.contains(e.target)) return;
+      if (configMenu.contains(e.target)) return;
+      setConfigMenuOpen(false);
+    });
+
+    // 「体检」默认隐藏（暂时用不上）：右键「配置」按钮 / 浮层才显隐，避免日常误点
+    const toggleThinkTest = e => {
+      e.preventDefault();
+      if (thinkTestBtn) thinkTestBtn.classList.toggle('is-visible');
+    };
+    if (configWrap) configWrap.addEventListener('contextmenu', toggleThinkTest);
+    if (configMenu) configMenu.addEventListener('contextmenu', toggleThinkTest);
   }
 
   // 面板内置的思考参数体检：同一问题用不同思考参数各请求一次，直接看哪行真正生效
   async function runPanelThinkTest() {
     if (isStreaming) return;
+    setConfigMenuOpen(false);   // 收起浮层，让体检结果完整露出来
 
     const btn = shadowRoot.getElementById('panel-think-test');
     const replyArea = shadowRoot.getElementById('reply-area');
@@ -902,7 +1023,8 @@
         if (x.error) lines.push(`　错误：${String(x.error).slice(0, 100)}`);
         lines.push('');
       });
-      lines.push('哪一行标了「✅ 关掉了思考」，就在上面的「思考」下拉里选它对应的值。');
+      lines.push('想不思考：挑标了「✅ 关掉了思考」的那行，把上面的「思考」下拉设成对应值。');
+      lines.push('想深度思考：Claude 端点选 medium / high / xhigh / max（发 adaptive + effort），OpenAI 端点选 minimal / low / medium / high。');
       lines.push('如果每一行都在思考或超时，说明这个端点不支持关闭思考，建议把模型换成非推理模型（如 glm-5.3）。');
       replyContent.textContent = lines.join('\n');
     } catch (e) {
@@ -941,20 +1063,71 @@
     renderThinkSelect(cfg);
   }
 
-  // 划词面板可切换的模型（与设置页的「划词使用的模型」同一套）
-  const PANEL_MODEL_OPTIONS = [
-    { value: '', label: '跟随主配置' },
-    { value: 'tc-code-latest', label: 'Auto 智能路由' },
-    { value: 'hy3', label: 'Hy3' },
-    { value: 'hy4-preview', label: 'Hy4 Preview' },
-    { value: 'deepseek-v4-pro-202606', label: 'DeepSeek V4 Pro' },
-    { value: 'deepseek-v4-flash-202605', label: 'DeepSeek V4 Flash' },
-    { value: 'glm-5.3', label: 'GLM-5.3' },
-    { value: 'glm-5.2', label: 'GLM-5.2' },
-    { value: 'minimax-m3', label: 'MiniMax M3' },
-    { value: 'kimi-k2.7-code', label: 'Kimi K2.7 Code' },
-    { value: 'claude-opus-5', label: 'Claude Opus 5' },
-    { value: 'gpt-5.2', label: 'GPT-5.2' },
+  // 划词面板可切换的模型：与设置页「划词使用的模型」同一套，按厂商分组
+  const PANEL_MODEL_GROUPS = [
+    {
+      label: '',
+      options: [{ value: '', label: '跟随主配置' }],
+    },
+    {
+      label: '腾讯 Token Plan',
+      options: [
+        { value: 'tc-code-latest', label: 'Auto（智能路由）' },
+        { value: 'hy4-preview', label: 'Hy4 Preview（混元）' },
+        { value: 'hy3', label: 'Hy3（混元）' },
+        // 腾讯云 TokenHub 官方 model 参数（2026-09-10 上线，1M 上下文 / 384k 输出）
+        { value: 'deepseek/deepseek-flash', label: 'DeepSeek V4.1 Flash 原厂直供（最新）' },
+        { value: 'deepseek-v4-pro-202606', label: 'DeepSeek V4 Pro 正式版' },
+        { value: 'deepseek-v4-flash-202605', label: 'DeepSeek V4 Flash 正式版' },
+        { value: 'glm-5.3', label: 'GLM-5.3' },
+        { value: 'glm-5.3-flash', label: 'GLM-5.3-Flash' },
+        { value: 'glm-5.3-flashx', label: 'GLM-5.3-FlashX' },
+        { value: 'glm-5.2', label: 'GLM-5.2' },
+        { value: 'minimax-m3', label: 'MiniMax M3' },
+        { value: 'minimax-m2.7', label: 'MiniMax M2.7' },
+        { value: 'kimi-k3', label: 'Kimi K3' },
+        { value: 'kimi-k2.8-preview', label: 'Kimi K2.8 Preview' },
+        { value: 'kimi-k2.7-code', label: 'Kimi K2.7 Code' },
+      ],
+    },
+    {
+      label: 'OpenAI',
+      options: [
+        { value: 'gpt-6-astra', label: 'GPT-6 Astra（最新旗舰）' },
+        { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
+        { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
+        { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
+        { value: 'gpt-5.5', label: 'GPT-5.5' },
+        { value: 'gpt-5.4', label: 'GPT-5.4' },
+        { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
+        { value: 'gpt-5.4-nano', label: 'GPT-5.4 Nano' },
+        { value: 'gpt-5.2', label: 'GPT-5.2（旧版）' },
+        { value: 'gpt-5.1', label: 'GPT-5.1（旧版）' },
+      ],
+    },
+    {
+      label: 'Anthropic Claude',
+      options: [
+        { value: 'claude-fable-5', label: 'Claude Fable 5（最强）' },
+        { value: 'claude-opus-5', label: 'Claude Opus 5' },
+        { value: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
+        { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
+      ],
+    },
+    {
+      label: 'DeepSeek',
+      options: [
+        { value: 'deepseek-flash', label: 'DeepSeek V4.1 Flash（最新）' },
+        { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
+      ],
+    },
+    {
+      label: '通义千问',
+      options: [
+        { value: 'qwen3.8-max', label: '通义千问 3.8-Max' },
+        { value: 'qwen3.7-plus', label: '通义千问 3.7-Plus' },
+      ],
+    },
   ];
 
   function renderModelSelect(cfg) {
@@ -963,31 +1136,53 @@
 
     const mainModel = (cfg && cfg.model) || '';
     const current = (cfg && cfg.selectionModel) || '';
-
-    const opts = PANEL_MODEL_OPTIONS.map(o => ({ ...o }));
-    opts[0].label = mainModel ? `跟随主配置（${mainModel}）` : '跟随主配置';
-    // 用户在设置里选了不在列表内的自定义模型时补一项
-    if (current && !opts.some(o => o.value === current)) {
-      opts.splice(1, 0, { value: current, label: current });
-    }
+    const known = new Set();
 
     sel.innerHTML = '';
-    opts.forEach(o => {
-      const opt = document.createElement('option');
-      opt.value = o.value;
-      opt.textContent = o.label;
-      sel.appendChild(opt);
+    PANEL_MODEL_GROUPS.forEach((group, gi) => {
+      const parent = group.label ? document.createElement('optgroup') : sel;
+      if (group.label) {
+        parent.label = group.label;
+        sel.appendChild(parent);
+      }
+      group.options.forEach((o, oi) => {
+        const opt = document.createElement('option');
+        opt.value = o.value;
+        // 第一项显示「跟随主配置（当前模型）」，一眼看出实际用的是哪个
+        opt.textContent = (gi === 0 && oi === 0 && mainModel)
+          ? `跟随主配置（${mainModel}）`
+          : o.label;
+        known.add(o.value);
+        parent.appendChild(opt);
+      });
     });
+
+    // 设置页里填了列表外的自定义模型时，单独补一组
+    if (current && !known.has(current)) {
+      const grp = document.createElement('optgroup');
+      grp.label = '自定义（来自设置页）';
+      const opt = document.createElement('option');
+      opt.value = current;
+      opt.textContent = current;
+      grp.appendChild(opt);
+      sel.appendChild(grp);
+    }
+
     sel.value = current;
+    sel.title = `划词使用的模型：${current || mainModel || '跟随主配置'}`;
   }
 
   // 划词思考强度：面板上直接可调，'' 表示不向接口发送该参数
+  // 列表对各端点是共用的：Claude 端认 low/medium/high/xhigh/max，
+  // OpenAI 端认 minimal/low/medium/high，腾讯混元认 no_think
   const THINK_OPTIONS = [
     { value: 'no_think', label: '不思考 no_think' },
     { value: 'minimal', label: '最快 minimal' },
     { value: 'low', label: '低 low' },
     { value: 'medium', label: '中 medium' },
-    { value: 'high', label: '高 high' },
+    { value: 'high', label: '高 high（Claude 默认）' },
+    { value: 'xhigh', label: '更高 xhigh（Claude）' },
+    { value: 'max', label: '最深 max（Claude）' },
     { value: '', label: '不发送参数' },
   ];
 
@@ -1132,8 +1327,7 @@
           const btnEl = shadowRoot.getElementById('btn-save-session');
           if (btnEl) {
             btnEl.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg> 已保存到聊天记录`;
-            btnEl.style.color = '#22C55E';
-            btnEl.style.borderColor = 'rgba(34,197,94,0.3)';
+            btnEl.classList.add('saved');
           }
         }
       }
@@ -1184,7 +1378,8 @@
     const replyArea = shadowRoot.getElementById('reply-area');
     const replyContent = shadowRoot.getElementById('reply-content');
     replyArea.style.display = 'block';
-    replyContent.innerHTML = `<span style="color:${isError ? '#FCA5A5' : '#F1F5F9'}">${text}</span>`;
+    // 浅色背景上原来的 #F1F5F9 / #FCA5A5 几乎看不见，换成能读的深色
+    replyContent.innerHTML = `<span style="color:${isError ? '#CC3333' : '#3C3C3C'}">${text}</span>`;
   }
 
   function setSendBtnState(disabled) {
@@ -1199,7 +1394,7 @@
     if (sendIcon) {
       sendIcon.outerHTML = disabled
         ? '<div id="send-icon" class="spinner"></div>'
-        : `<svg id="send-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>`;
+        : `<svg id="send-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>`;
     }
   }
 
