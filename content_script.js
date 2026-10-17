@@ -100,6 +100,7 @@
   let panel = null;
   let shadowRoot = null;
   let shadowHost = null;
+  let replyAutoScroll = null;   // 回答区贴底滚动控制（见 autoscroll.js）
   let currentSelection = '';
   let currentRange = null;
   let isStreaming = false;
@@ -231,7 +232,7 @@
 
     menu.style.display = 'flex';
     if (!btn || !shadowHost) return;
-    // 右对齐「配置」按钮、向下展开；下方空间不够就翻到按钮上方
+    // 右对齐齿轮按钮、向下展开；下方空间不够就翻到按钮上方
     const b = btn.getBoundingClientRect();
     const host = shadowHost.getBoundingClientRect();
     menu.style.left = Math.max(6, b.right - host.left - menu.offsetWidth) + 'px';
@@ -295,6 +296,7 @@
     if (replyArea) replyArea.style.display = 'none';
     if (customInput) customInput.value = '';
     if (saveBtn) saveBtn.style.display = 'none';
+    if (replyAutoScroll) replyAutoScroll.reset();   // 重新打开面板：恢复自动贴底
     isStreaming = false;
     setSendBtnState(false);
 
@@ -335,7 +337,12 @@
           </div>
           <div class="header-actions">
             <div class="config-wrap" id="config-wrap">
-              <button class="config-btn" id="config-btn" title="切换模型 / 思考深度">配置</button>
+              <button class="config-btn" id="config-btn" title="配置：切换模型 / 思考深度" aria-label="配置">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 008 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H2a2 2 0 010-4h.09A1.65 1.65 0 004.6 8a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V2a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H22a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"></path>
+                </svg>
+              </button>
             </div>
             <button class="close-btn" id="close-btn">×</button>
           </div>
@@ -473,27 +480,33 @@
         flex-shrink: 0;
       }
       .config-wrap { flex-shrink: 0; }
+      /* 与 close-btn 同尺寸的小齿轮图标按钮 */
       .config-btn {
-        font-size: 10px;
-        font-weight: 800;
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         font-family: inherit;
         color: #3C3C3C;
         background: #FFFFFF;
         border: 2px solid #AFAFAF;
         border-radius: 8px;
-        padding: 3px 9px;
         cursor: pointer;
         box-shadow: 0 2px 0 #AFAFAF;
         transition: all 0.15s;
       }
+      .config-btn svg { display: block; }
       .config-btn:hover { background: #F0F0F0; }
+      .config-btn:active { transform: translateY(1px); box-shadow: 0 1px 0 #AFAFAF; }
       .config-btn.active {
         background: #E8F4FF;
         border-color: #1CB0F6;
         color: #0090D4;
         box-shadow: 0 2px 0 #0090D4;
       }
-      /* 挂在 #panel 外面（面板 overflow:hidden 会裁掉浮层），位置由 JS 按「配置」按钮算 */
+      /* 挂在 #panel 外面（面板 overflow:hidden 会裁掉浮层），位置由 JS 按齿轮按钮算 */
       .config-menu {
         position: absolute;
         top: 0;
@@ -579,7 +592,7 @@
       }
       .panel-mini-btn:hover:not(:disabled) { background: #D6ECFF; }
       .panel-mini-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-      /* 「体检」默认隐藏，右键「配置」区域可显隐 */
+      /* 「体检」默认隐藏，右键齿轮区域可显隐 */
       #panel-think-test { display: none; }
       #panel-think-test.is-visible { display: inline-flex; align-items: center; align-self: flex-start; }
 
@@ -907,6 +920,11 @@
 
     closeBtn.addEventListener('click', hidePanel);
 
+    // 回答区：流式输出自动贴底，但用户一上滑就停（见 autoscroll.js）
+    replyAutoScroll = window.LumenAutoScroll
+      ? window.LumenAutoScroll.create(shadowRoot.getElementById('reply-area'))
+      : null;
+
     // 动态渲染的快捷按钮使用事件委托
     const presetContainer = shadowRoot.getElementById('preset-btns');
     presetContainer.addEventListener('click', e => {
@@ -957,7 +975,7 @@
       thinkTestBtn.addEventListener('click', () => runPanelThinkTest());
     }
 
-    // 「配置」浮层：模型 / 思考深度都在里面，点其他地方自动收起
+    // 齿轮浮层：模型 / 思考深度都在里面，点其他地方自动收起
     const configBtn = shadowRoot.getElementById('config-btn');
     const configMenu = shadowRoot.getElementById('config-menu');
     const configWrap = shadowRoot.getElementById('config-wrap');
@@ -974,7 +992,7 @@
       setConfigMenuOpen(false);
     });
 
-    // 「体检」默认隐藏（暂时用不上）：右键「配置」按钮 / 浮层才显隐，避免日常误点
+    // 「体检」默认隐藏（暂时用不上）：右键齿轮按钮 / 浮层才显隐，避免日常误点
     const toggleThinkTest = e => {
       e.preventDefault();
       if (thinkTestBtn) thinkTestBtn.classList.toggle('is-visible');
@@ -1263,6 +1281,8 @@
 
     replyArea.style.display = 'block';
     replyContent.innerHTML = '';
+    // 新一轮输出：重新开启自动贴底（上一轮用户可能上滑停过）
+    if (replyAutoScroll) { replyAutoScroll.reset(); replyAutoScroll.forceBottom(); }
     if (saveBtn) saveBtn.style.display = 'none';
     if (loading) {
       loading.style.display = 'flex';
@@ -1295,7 +1315,6 @@
           if (statusEl && statusEl.textContent) setStatus('');
           fullReply += chunk;
           renderReply(fullReply, true);
-          replyArea.scrollTop = replyArea.scrollHeight;
         },
       });
     } catch (err) {
@@ -1351,8 +1370,8 @@
     if (!replyContent) return;
     replyContent.classList.toggle('compact', text.length > COMPACT_THRESHOLD);
     replyContent.innerHTML = LumenMD.render(text) + (streaming ? '<span class="cursor"></span>' : '');
-    const replyArea = shadowRoot.getElementById('reply-area');
-    if (replyArea && streaming) replyArea.scrollTop = replyArea.scrollHeight;
+    // 贴底只在「用户没有上滑」时生效，上滑期间不动滚动位置
+    if (replyAutoScroll && streaming) replyAutoScroll.toBottom();
   }
 
   // 粗略估算 token 数（与 popup 同一算法：CJK ≈ 1.5 字符/token，其余 ≈ 4 字符/token）

@@ -154,6 +154,10 @@ const btnSettings = document.getElementById('btnSettings');
 const configBanner = document.getElementById('configBanner');
 const bannerGoSettings = document.getElementById('bannerGoSettings');
 
+// 流式输出时自动贴底；用户一上滑就停，滑回底部再恢复（见 autoscroll.js）
+// 取不到控制器时降级为 null（等同于旧行为里不再自动滚动），不影响聊天主流程
+const autoScroll = window.LumenAutoScroll ? window.LumenAutoScroll.create(messagesEl) : null;
+
 // ===== Init =====
 async function init() {
   const data = await chrome.storage.local.get([SESSIONS_KEY, ACTIVE_ID_KEY, TOKEN_KEY]);
@@ -277,14 +281,20 @@ function renderSidebar() {
 }
 
 // ===== Render Messages =====
-function renderMessages(instant = true) {
+// keepScroll=true：流式结束后的原地重渲染——用户正在上滑看历史时别把他拽回底部
+// 默认 false：切会话 / 新建 / 清空，直接跳到最新消息并恢复自动贴底
+function renderMessages(keepScroll = false) {
   const session = getActiveSession();
+  // 整体重渲染会重置滚动位置，先按「是否仍在贴底」决定渲染后是跳底还是留在原处
+  const stayPut = !!(keepScroll && autoScroll && !autoScroll.isSticking());
+  const prevTop = messagesEl.scrollTop;
   messagesEl.innerHTML = '';
 
   if (!session || session.messages.length === 0) {
     messagesEl.appendChild(emptyStateEl);
     emptyStateEl.style.display = 'flex';
     chatTitleEl.textContent = session ? displayTitle(session.title) : 'Lumen Ask';
+    if (!stayPut) autoScroll?.reset();
     return;
   }
 
@@ -296,9 +306,15 @@ function renderMessages(instant = true) {
     appendMessageDOM(msg.role, msg.content);
   });
 
-  // 等浏览器完成布局后直接跳底（instant=true 无动画，切 session 时即时到位）
+  // 等浏览器完成布局后再定位。
+  // 清空 innerHTML 会先把 scrollTop 夹到 0 并派发一次 scroll 事件，
+  // 所以 reset 要放在 rAF 里紧挨着 forceBottom，别被那次事件带偏。
+  if (!stayPut) autoScroll?.reset();
   requestAnimationFrame(() => {
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    if (!autoScroll) return;
+    if (stayPut) { messagesEl.scrollTop = prevTop; return; }   // 恢复用户当前的阅读位置
+    autoScroll.reset();
+    autoScroll.forceBottom();
   });
 }
 
@@ -353,6 +369,8 @@ async function sendMessage() {
 
   setStreaming(true);
   const contentEl = appendMessageDOM('assistant', '', true);
+  // 新回复开始：重新开启自动贴底（上一轮用户可能上滑停过）
+  autoScroll?.reset();
   scrollToBottom();
 
   let fullReply = '';
@@ -416,8 +434,9 @@ async function sendMessage() {
     setStreaming(false);
 
     // 如果用户此时切回了这个 session，重新渲染显示完整回复
+    // keepScroll：用户正上滑看历史时保持阅读位置，别在收尾时把人拽回底部
     if (activeSessionId === thisSessionId) {
-      renderMessages();
+      renderMessages(true);
     }
   }
 }
@@ -851,7 +870,7 @@ function setStreaming(val) {
 }
 
 function scrollToBottom() {
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  if (autoScroll) autoScroll.toBottom();
 }
 
 function escHtml(str) {
