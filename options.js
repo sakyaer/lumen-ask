@@ -4,14 +4,68 @@ const DEFAULT_TOKEN_LIMIT = 30000000;
 
 const $ = id => document.getElementById(id);
 
+// 翻译按钮的提示词：单词给音标 / 词根 / 助记 / 联想，句子给译文 + 关键词拆解
+// 排版刻意要求「词典条目式」——每项一行、标签加粗、少用列表，避免面板里满屏圆点
+const TRANSLATE_PROMPT = `请把下面的内容翻译成中文，并整理成一张紧凑的学习卡片。
+
+选中内容：
+"""
+{text}
+"""
+
+排版要求（像词典条目一样紧凑，不要堆小标题和圆点）：
+- 第一行直接给结论：单词/短语写「**词性. 中文释义**」，后面可接一句简短说明；句子/段落直接给中文翻译。
+- 之后每一项各占一行，统一用「**标签：**内容」的行内写法，标签加粗、内容紧跟其后，不要把内容另起一行。
+- 除「联想」「例句」确有 3 项以上并列外，不要用列表；并列项在同一行用「｜」隔开。
+- 不要用 # 标题、--- 分割线，也不要给每一项单独开 bullet。
+
+按下面的顺序给出（能省则省，不要重复）：
+**音标：**英 /…/ ｜ 美 /…/（不确定就写「待核实」，不要编造）
+**释义：**词性 + 中文释义 —— 一句英文释义
+**词根词缀：**拆分前缀 / 词根 / 后缀，说明含义与来源
+**助记：**一条具体、可复述的联想 / 谐音 / 构词记忆法
+**联想：**同根词 … ｜ 近义词 … ｜ 反义词 … ｜ 常见搭配 …
+**例句：**英文例句 —— 中文翻译（1-2 条）
+
+如果选中内容是句子或段落：先给整句中文翻译，再用同样格式挑 2-4 个关键词逐个讲，关键词之间空一行。
+内容里若有数学公式，用 $...$（行内）或 $$...$$（独立成行）。不确定的信息直接说明，不要编造。`;
+
 // 默认划词快捷按钮（label + 提示词，{text} 会被替换为选中文字）
+// save: 'wordbook' = 结果只进单词本，不写聊天记录；'chat' = 存进聊天记录
 const DEFAULT_PRESETS = [
-  { label: '简介', prompt: '请用150字以内简明扼要地介绍以下内容是什么，不要超过150字：\n\n{text}' },
-  { label: '解释', prompt: '请详细解释以下内容：\n\n{text}' },
-  { label: '翻译', prompt: '请将以下内容翻译成中文：\n\n{text}' },
-  { label: '总结', prompt: '请总结以下内容的要点：\n\n{text}' },
-  { label: '润色', prompt: '请优化以下内容的表达：\n\n{text}' },
+  { label: '简介', prompt: '请用150字以内简明扼要地介绍以下内容是什么，不要超过150字：\n\n{text}', save: 'chat' },
+  { label: '解释', prompt: '请详细解释以下内容：\n\n{text}', save: 'chat' },
+  { label: '翻译', prompt: TRANSLATE_PROMPT, save: 'wordbook' },
+  { label: '总结', prompt: '请总结以下内容的要点：\n\n{text}', save: 'chat' },
+  { label: '润色', prompt: '请优化以下内容的表达：\n\n{text}', save: 'chat' },
 ];
+
+// 老版本翻译提示词：命中说明用户没改过，升级成新版学习卡片提示词
+// 用特征串匹配，旧版长提示词也能识别
+const LEGACY_TRANSLATE_MARKS = [
+  '请将以下内容翻译成中文',
+  '整理成一张便于记忆的学习卡片',
+];
+function isLegacyTranslatePrompt(prompt) {
+  const s = String(prompt || '').trim();
+  return LEGACY_TRANSLATE_MARKS.some(m => s.includes(m));
+}
+
+function migratePresets(presets) {
+  return presets.map(p => {
+    const label = String(p.label || '').trim();
+    const prompt = String(p.prompt || '');
+    let save = p.save === 'wordbook' || p.save === 'chat' ? p.save : '';
+    if (!save) {
+      save = /^(翻译|translate)/i.test(label) || isLegacyTranslatePrompt(prompt)
+        ? 'wordbook' : 'chat';
+    }
+    if (isLegacyTranslatePrompt(prompt) && save === 'wordbook') {
+      return { label, prompt: TRANSLATE_PROMPT, save };
+    }
+    return { label, prompt, save };
+  });
+}
 
 // DOM refs
 const apiKeyInput = $('apiKey');
@@ -70,13 +124,14 @@ chrome.storage.sync.get(STORAGE_KEY, result => {
       cfg.selectionReasoningEffort !== undefined ? cfg.selectionReasoningEffort : 'no_think';
   }
   tokenLimitInput.value = cfg.tokenLimit || DEFAULT_TOKEN_LIMIT;
-  // 面板尺寸：默认宽度 468 = 原 360×1.3，回答区 288 = 原 180×1.6
+  // 面板尺寸：默认宽度 468 = 原 360×1.3，回答区 374 = 原 288×1.3（整体上调 30%）
   panelWidthInput.value = cfg.panelWidth || 468;
-  replyHeightInput.value = cfg.replyHeight || 288;
+  // 旧默认 288 视为未自定义，展示为新默认值
+  replyHeightInput.value = (!cfg.replyHeight || cfg.replyHeight === 288) ? 374 : cfg.replyHeight;
 
   // Load preset prompts
   const presets = Array.isArray(cfg.presetPrompts) && cfg.presetPrompts.length
-    ? cfg.presetPrompts
+    ? migratePresets(cfg.presetPrompts)
     : DEFAULT_PRESETS;
   renderPresetEditor(presets);
 
@@ -156,7 +211,7 @@ saveBtn.addEventListener('click', async () => {
     : 'no_think';
 
   const panelWidth = Math.min(Math.max(parseInt(panelWidthInput.value) || 468, 320), 800);
-  const replyHeight = Math.min(Math.max(parseInt(replyHeightInput.value) || 288, 120), 800);
+  const replyHeight = Math.min(Math.max(parseInt(replyHeightInput.value) || 374, 120), 800);
 
   const config = {
     apiKey, baseUrl, model, systemPrompt, enableSelection, selectionModel,
@@ -177,11 +232,11 @@ saveBtn.addEventListener('click', async () => {
 function renderPresetEditor(presets) {
   presetEditor.innerHTML = '';
   presets.forEach((p, i) => {
-    presetEditor.appendChild(createPresetRow(p.label || '', p.prompt || '', i));
+    presetEditor.appendChild(createPresetRow(p.label || '', p.prompt || '', i, p.save || 'chat'));
   });
 }
 
-function createPresetRow(label, prompt, index) {
+function createPresetRow(label, prompt, index, save) {
   const row = document.createElement('div');
   row.className = 'preset-row';
 
@@ -211,18 +266,43 @@ function createPresetRow(label, prompt, index) {
   top.appendChild(labelInput);
   top.appendChild(removeBtn);
 
+  // 结果去向：聊天记录 / 单词本（翻译类默认进单词本）
+  const sinkRow = document.createElement('div');
+  sinkRow.className = 'preset-sink-row';
+
+  const sinkLabel = document.createElement('span');
+  sinkLabel.className = 'preset-sink-label';
+  sinkLabel.textContent = '结果存入';
+
+  const sinkSelect = document.createElement('select');
+  sinkSelect.className = 'preset-sink-select';
+  [
+    { value: 'chat', text: '聊天记录' },
+    { value: 'wordbook', text: '单词本（不写聊天记录）' },
+  ].forEach(o => {
+    const opt = document.createElement('option');
+    opt.value = o.value;
+    opt.textContent = o.text;
+    sinkSelect.appendChild(opt);
+  });
+  sinkSelect.value = save === 'wordbook' ? 'wordbook' : 'chat';
+
+  sinkRow.appendChild(sinkLabel);
+  sinkRow.appendChild(sinkSelect);
+
   const promptInput = document.createElement('textarea');
   promptInput.className = 'preset-prompt-input';
   promptInput.placeholder = '提示词，可用 {text} 代表选中的文字';
   promptInput.value = prompt;
 
   row.appendChild(top);
+  row.appendChild(sinkRow);
   row.appendChild(promptInput);
   return row;
 }
 
 btnAddPreset.addEventListener('click', () => {
-  presetEditor.appendChild(createPresetRow('', '', presetEditor.children.length));
+  presetEditor.appendChild(createPresetRow('', '', presetEditor.children.length, 'chat'));
 });
 
 function collectPresets() {
@@ -230,8 +310,9 @@ function collectPresets() {
   presetEditor.querySelectorAll('.preset-row').forEach(row => {
     const label = row.querySelector('.preset-label-input').value.trim();
     const prompt = row.querySelector('.preset-prompt-input').value.trim();
+    const save = row.querySelector('.preset-sink-select')?.value === 'wordbook' ? 'wordbook' : 'chat';
     if (!label || !prompt) return;
-    presets.push({ label, prompt });
+    presets.push({ label, prompt, save });
   });
   return presets;
 }

@@ -17,7 +17,7 @@ async function reinjectToOpenTabs() {
       if (tab.url && !/^https?:/i.test(tab.url)) continue;
       chrome.scripting.executeScript({
         target: { tabId: tab.id, allFrames: true },
-        files: ['md-renderer.js', 'autoscroll.js', 'content_script.js'],
+        files: ['katex/katex.min.js', 'katex/katex-css.js', 'md-renderer.js', 'autoscroll.js', 'content_script.js'],
       }).catch(() => {});   // chrome:// 等不可注入的页面，忽略
     }
   } catch (e) {
@@ -36,6 +36,13 @@ reinjectToOpenTabs();
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'STREAM_CHAT') {
     handleStreamChat(msg.payload, sender.tab?.id, msg.requestId);
+    sendResponse({ ok: true });
+    return true;
+  }
+  if (msg.type === 'OPEN_WORDBOOK') {
+    // 划词面板里点「已存入单词本」：Popup 若已打开会自己切视图；
+    // 没打开时尝试把它拉起来（Chrome 127+ 允许，旧版本静默失败）
+    try { chrome.action.openPopup?.()?.catch?.(() => {}); } catch {}
     sendResponse({ ok: true });
     return true;
   }

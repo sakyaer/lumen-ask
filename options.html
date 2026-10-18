@@ -307,8 +307,8 @@
 
         <div class="form-group" style="margin-top:20px;">
           <label for="replyHeight">回答区最大高度（px）</label>
-          <input type="number" id="replyHeight" class="form-input" placeholder="288" min="120" max="800" step="8">
-          <p class="form-hint">默认 288，可填 120–800。回答超出时在区内滚动。保存后重新打开面板生效。</p>
+          <input type="number" id="replyHeight" class="form-input" placeholder="374" min="120" max="800" step="8">
+          <p class="form-hint">默认 374（旧版 288 上调 30%），可填 120–800。回答超出时在区内滚动。保存后重新打开面板生效。</p>
         </div>
       </div>
 
@@ -316,7 +316,11 @@
 
       <div class="card-section">
         <div class="section-title" data-icon="⚡">划词快捷按钮</div>
-        <div class="toggle-desc" style="margin-bottom:16px;">自定义划词面板中的快捷提问按钮。每条包含<strong>按钮名称</strong>和<strong>提示词</strong>，提示词中的 <code>{text}</code> 会被替换为选中的文字。</div>
+        <div class="toggle-desc" style="margin-bottom:16px;">
+          自定义划词面板中的快捷提问按钮。每条包含<strong>按钮名称</strong>、<strong>结果去向</strong>和<strong>提示词</strong>，提示词中的 <code>{text}</code> 会被替换为选中的文字。<br>
+          「结果存入」选 <strong>单词本</strong> 的按钮，回答只进单词本、不写进聊天记录（默认的「翻译」就是这样，并会给出音标 / 词根 / 助记 / 联想词汇）；
+          选 <strong>聊天记录</strong> 则和以前一样自动存一条划词会话。模型输出支持 Markdown 与 LaTeX 公式（<code>$...$</code> / <code>$$...$$</code>）。
+        </div>
         <div id="presetEditor" class="preset-editor"></div>
         <button class="btn-add-preset" id="btnAddPreset">+ 添加快捷按钮</button>
       </div>

@@ -5,7 +5,14 @@
   const ACTIVE_ID_KEY = 'llm_active_session_id';
   const CONFIG_KEY = 'llm_config';
   const TOKEN_KEY = 'llm_total_tokens';
+  const WORDBOOK_KEY = 'llm_wordbook';        // 单词本（local，不进聊天记录）
+  const PENDING_VIEW_KEY = 'llm_pending_view'; // 打开 Popup 时要定位到的视图
   const MAX_SESSIONS = 50;
+  const MAX_WORDBOOK = 800;
+
+  // 回答区默认高度：288 是旧默认值，整体上调 30% → 374，减少面板内滚动
+  const LEGACY_REPLY_HEIGHT = 288;
+  const DEFAULT_REPLY_HEIGHT = 374;
 
   // 防重复注入。若本页已注入过（插件重载后 background 会重新注入一次），
   // 先让旧实例自报状态：旧实例仍存活 → 本次直接退出；旧实例已失效 → 清理残留后由本次接管。
@@ -197,6 +204,19 @@
     shadowRoot = shadowHost.attachShadow({ mode: 'open' });
 
     // Inject styles into shadow DOM
+    // KaTeX 样式先注入，面板样式后注入，面板里的字号/间距覆盖才能生效
+    try {
+      const katexCss = window.__LUMEN_KATEX_CSS;
+      if (katexCss) {
+        const katexStyle = document.createElement('style');
+        katexStyle.textContent = katexCss.replace(
+          /__LUMEN_FONT_BASE__/g,
+          chrome.runtime.getURL('katex/fonts/')
+        );
+        shadowRoot.appendChild(katexStyle);
+      }
+    } catch { /* 缺少 katex 资源时忽略，公式会退化为原文 */ }
+
     const style = document.createElement('style');
     style.textContent = getPanelCSS();
     shadowRoot.appendChild(style);
@@ -211,14 +231,17 @@
   }
 
   // ===== 面板尺寸（设置页可配）=====
-  // 默认宽度 468 = 原 360×1.3；回答区 288 = 原 180×1.6
+  // 默认宽度 468 = 原 360×1.3；回答区 374 = 原 288×1.3
   function getPanelWidth() {
     const w = Number(cachedConfig && cachedConfig.panelWidth);
     return Number.isFinite(w) && w >= 320 ? Math.min(w, 800) : 468;
   }
   function getReplyHeight() {
     const h = Number(cachedConfig && cachedConfig.replyHeight);
-    return Number.isFinite(h) && h >= 120 ? Math.min(h, 800) : 288;
+    if (!Number.isFinite(h) || h < 120) return DEFAULT_REPLY_HEIGHT;
+    // 旧默认 288 视为未自定义，直接按新默认 374 渲染（老配置也能立即变高）
+    if (h === LEGACY_REPLY_HEIGHT) return DEFAULT_REPLY_HEIGHT;
+    return Math.min(h, 800);
   }
 
   // 「配置」浮层：模型 / 思考深度都收在这里，避免常驻占地方
@@ -709,7 +732,7 @@
       .send-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
       .reply-area {
-        max-height: 288px;
+        max-height: 374px;
         overflow-y: auto;
         border-bottom: 2px solid #E5E5E5;
         background: #F7F7F7;
@@ -807,6 +830,12 @@
         padding-left: 20px;
       }
       .md-list li { margin: 2px 0; }
+      /* 子项（模型把「音标 / 词性」缩进一层时按层级缩进显示） */
+      .md-list .md-list { margin: 2px 0; padding-left: 16px; }
+      .md-list .md-list li { margin: 1px 0; }
+      /* 「**标签：**内容」词条行：不带圆点，像词典一样紧凑 */
+      .md-defs { margin: 3px 0 6px; display: flex; flex-direction: column; gap: 3px; }
+      .md-def { margin: 0; line-height: 1.55; }
 
       .md-quote {
         border-left: 3px solid #1CB0F6;
@@ -822,6 +851,24 @@
         border-top: 1.5px solid #E5E5E5;
         margin: 8px 0;
       }
+
+      /* ===== 数学公式（KaTeX）===== */
+      .math-inline { display: inline-block; vertical-align: baseline; }
+      .math-display {
+        display: block;
+        margin: 7px 0;
+        padding: 2px 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+        text-align: center;
+      }
+      .math-display .katex-display { margin: 0; }
+      .katex { font-size: 1.06em; }
+      .reply-content.compact .katex { font-size: 1em; }
+      .math-fallback { color: #CC3333; }
+      /* 公式过长时横向滚动条细一点 */
+      .math-display::-webkit-scrollbar { height: 3px; }
+      .math-display::-webkit-scrollbar-thumb { background: #D9D9D9; border-radius: 3px; }
 
       .md-table-wrap {
         overflow-x: auto;
@@ -932,7 +979,11 @@
       const btn = e.target.closest('.preset-btn');
       if (!btn) return;
       const prompt = btn.dataset.prompt.replace('{text}', currentSelection);
-      askAI(prompt, [{ role: 'user', content: prompt }]);
+      const sink = btn.dataset.save === 'wordbook' ? 'wordbook' : 'chat';
+      askAI(prompt, [{ role: 'user', content: prompt }], {
+        sink,
+        term: currentSelection,
+      });
     });
 
     sendBtn.addEventListener('click', () => handleCustomSend());
@@ -940,7 +991,11 @@
       if (e.key === 'Enter') { e.preventDefault(); handleCustomSend(); }
     });
 
-    saveSessionBtn.addEventListener('click', openPopupForSession);
+    saveSessionBtn.addEventListener('click', () => {
+      // 同一个按钮承载两种去向：翻译结果 → 单词本，其他 → 聊天记录
+      if (saveSessionBtn.dataset.mode === 'wordbook') openWordbook();
+      else openPopupForSession();
+    });
 
     // 面板内直接切模型 / 调思考强度（写回配置，与设置页同步）
     const patchConfig = async (patch) => {
@@ -1052,27 +1107,87 @@
     }
   }
 
+  // 翻译按钮的提示词：单词给音标 / 词根 / 助记 / 联想，句子给译文 + 关键词拆解
+  // 排版刻意要求「词典条目式」——每项一行、标签加粗、少用列表，避免面板里满屏圆点
+  const TRANSLATE_PROMPT = `请把下面的内容翻译成中文，并整理成一张紧凑的学习卡片。
+
+选中内容：
+"""
+{text}
+"""
+
+排版要求（像词典条目一样紧凑，不要堆小标题和圆点）：
+- 第一行直接给结论：单词/短语写「**词性. 中文释义**」，后面可接一句简短说明；句子/段落直接给中文翻译。
+- 之后每一项各占一行，统一用「**标签：**内容」的行内写法，标签加粗、内容紧跟其后，不要把内容另起一行。
+- 除「联想」「例句」确有 3 项以上并列外，不要用列表；并列项在同一行用「｜」隔开。
+- 不要用 # 标题、--- 分割线，也不要给每一项单独开 bullet。
+
+按下面的顺序给出（能省则省，不要重复）：
+**音标：**英 /…/ ｜ 美 /…/（不确定就写「待核实」，不要编造）
+**释义：**词性 + 中文释义 —— 一句英文释义
+**词根词缀：**拆分前缀 / 词根 / 后缀，说明含义与来源
+**助记：**一条具体、可复述的联想 / 谐音 / 构词记忆法
+**联想：**同根词 … ｜ 近义词 … ｜ 反义词 … ｜ 常见搭配 …
+**例句：**英文例句 —— 中文翻译（1-2 条）
+
+如果选中内容是句子或段落：先给整句中文翻译，再用同样格式挑 2-4 个关键词逐个讲，关键词之间空一行。
+内容里若有数学公式，用 $...$（行内）或 $$...$$（独立成行）。不确定的信息直接说明，不要编造。`;
+
   // 根据配置渲染划词面板的快捷按钮
   const DEFAULT_PRESETS = [
     { label: '简介', prompt: '请用150字以内简明扼要地介绍以下内容是什么，不要超过150字：\n\n{text}' },
     { label: '解释', prompt: '请详细解释以下内容：\n\n{text}' },
-    { label: '翻译', prompt: '请将以下内容翻译成中文：\n\n{text}' },
+    { label: '翻译', prompt: TRANSLATE_PROMPT, save: 'wordbook' },
     { label: '总结', prompt: '请总结以下内容的要点：\n\n{text}' },
     { label: '润色', prompt: '请优化以下内容的表达：\n\n{text}' },
   ];
 
+  // 历史版本的翻译提示词：命中说明用户没改过，可以安全升级成新版学习卡片提示词
+  // 用特征串匹配而不是全文比对，旧版长提示词也能被识别
+  const LEGACY_TRANSLATE_MARKS = [
+    '请将以下内容翻译成中文',
+    '整理成一张便于记忆的学习卡片',   // v1.1.0 的翻译提示词
+  ];
+  function isLegacyTranslatePrompt(prompt) {
+    const s = String(prompt || '').trim();
+    return LEGACY_TRANSLATE_MARKS.some(m => s.includes(m));
+  }
+
+  // 统一预设结构：{ label, prompt, save: 'chat' | 'wordbook' }
+  // 老配置没有 save 字段，标签为「翻译」的按单词本处理
+  function normalizePresets(cfg) {
+    const list = (cfg && Array.isArray(cfg.presetPrompts) && cfg.presetPrompts.length)
+      ? cfg.presetPrompts
+      : DEFAULT_PRESETS;
+
+    return list
+      .filter(p => p && p.label && p.prompt)
+      .map(p => {
+        const label = String(p.label).trim();
+        let prompt = String(p.prompt);
+        let save = p.save === 'wordbook' || p.save === 'chat' ? p.save : '';
+
+        if (!save) {
+          save = /^(翻译|translate)/i.test(label) || isLegacyTranslatePrompt(prompt)
+            ? 'wordbook' : 'chat';
+        }
+        // 只要提示词还是旧版模板就升级（即使 save 已显式保存过）
+        if (save === 'wordbook' && isLegacyTranslatePrompt(prompt)) prompt = TRANSLATE_PROMPT;
+
+        return { label, prompt, save };
+      });
+  }
+
   function renderPresetButtons(cfg) {
     const container = shadowRoot.getElementById('preset-btns');
     if (!container) return;
-    const presets = (cfg && Array.isArray(cfg.presetPrompts) && cfg.presetPrompts.length)
-      ? cfg.presetPrompts
-      : DEFAULT_PRESETS;
+    const presets = normalizePresets(cfg);
     container.innerHTML = '';
     presets.forEach(p => {
-      if (!p.label || !p.prompt) return;
       const btn = document.createElement('button');
       btn.className = 'preset-btn';
       btn.dataset.prompt = p.prompt;
+      btn.dataset.save = p.save;
       btn.textContent = p.label;
       container.appendChild(btn);
     });
@@ -1237,13 +1352,16 @@
     const text = input.value.trim();
     if (!text) return;
     const prompt = `关于以下内容：\n\n${currentSelection}\n\n${text}`;
-    askAI(prompt, [{ role: 'user', content: prompt }]);
+    askAI(prompt, [{ role: 'user', content: prompt }], { sink: 'chat' });
     input.value = '';
   }
 
   let lastMessages = [];
 
-  async function askAI(displayPrompt, messages) {
+  // opts.sink: 'chat' 存进聊天记录（默认）；'wordbook' 只进单词本
+  async function askAI(displayPrompt, messages, opts = {}) {
+    const sink = opts.sink === 'wordbook' ? 'wordbook' : 'chat';
+    const term = (opts.term || currentSelection || '').trim();
     let cfg;
     try {
       const cfgData = await chrome.storage.sync.get(CONFIG_KEY);
@@ -1338,21 +1456,19 @@
         // 计入 token 用量（提示词 + 回复），与 popup 的统计口径一致
         recordTokenUsage(lastMessages.filter(m => m.role === 'user').map(m => m.content).join('\n'), fullReply);
 
-        // 自动保存本次划词对话到聊天记录（标题加 [划词] 前缀）
-        const savedId = await saveCurrentToSession();
-        if (saveBtn) {
-          saveBtn.style.display = 'flex';
-          saveBtn.dataset.sessionId = savedId || '';
-          const btnEl = shadowRoot.getElementById('btn-save-session');
-          if (btnEl) {
-            btnEl.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg> 已保存到聊天记录`;
-            btnEl.classList.add('saved');
-          }
+        if (sink === 'wordbook') {
+          // 翻译类结果只入库单词本，不写入聊天记录
+          const entry = await saveToWordbook(term, fullReply);
+          setReplyAction('wordbook', entry);
+        } else {
+          // 自动保存本次划词对话到聊天记录
+          const savedId = await saveCurrentToSession();
+          setReplyAction('chat', savedId);
         }
       }
     } catch (e) {
-      // 保存到聊天记录失败不影响回复显示
-      console.warn('保存划词对话失败:', e);
+      // 保存失败不影响回复显示
+      console.warn('保存划词结果失败:', e);
     } finally {
       isStreaming = false;
       setSendBtnState(false);
@@ -1415,6 +1531,68 @@
         ? '<div id="send-icon" class="spinner"></div>'
         : `<svg id="send-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>`;
     }
+  }
+
+  // ===== Save to Wordbook（翻译结果进单词本，不写聊天记录）=====
+  // 同一个词再次翻译时覆盖旧结果并顶到最前，而不是堆一堆重复条目
+  async function saveToWordbook(term, result) {
+    const text = String(term || '').trim();
+    if (!text || !result) return null;
+
+    const data = await chrome.storage.local.get(WORDBOOK_KEY);
+    const list = Array.isArray(data[WORDBOOK_KEY]) ? data[WORDBOOK_KEY].slice() : [];
+    const key = text.toLowerCase();
+    const idx = list.findIndex(e => String(e.term || '').trim().toLowerCase() === key);
+    const prev = idx >= 0 ? list[idx] : null;
+    const now = Date.now();
+
+    const entry = {
+      id: (prev && prev.id) || `w${now}${Math.random().toString(36).slice(2, 7)}`,
+      term: text,
+      result,
+      model: lastUsedModel || '',
+      url: location.href,
+      title: (document.title || '').slice(0, 120),
+      createdAt: (prev && prev.createdAt) || now,
+      updatedAt: now,
+      hits: ((prev && prev.hits) || 0) + 1,
+    };
+
+    if (idx >= 0) list.splice(idx, 1);
+    list.unshift(entry);
+    while (list.length > MAX_WORDBOOK) list.pop();
+
+    await chrome.storage.local.set({ [WORDBOOK_KEY]: list });
+    return entry.id;
+  }
+
+  // 回复区右上角那颗按钮：聊天记录 / 单词本两种去向共用同一个元素
+  function setReplyAction(mode, detail) {
+    const wrap = shadowRoot.getElementById('save-session-btn');
+    const btn = shadowRoot.getElementById('btn-save-session');
+    if (!wrap || !btn) return;
+
+    wrap.style.display = 'flex';
+    btn.dataset.mode = mode;
+    btn.classList.add('saved');
+
+    if (mode === 'wordbook') {
+      btn.dataset.wordId = detail || '';
+      btn.title = '已存入单词本，点击查看';
+      btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg> 已存入单词本`;
+    } else {
+      btn.dataset.sessionId = detail || '';
+      btn.title = '点击打开 Popup 继续对话';
+      btn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg> 已保存到聊天记录`;
+    }
+  }
+
+  async function openWordbook() {
+    try {
+      await chrome.storage.local.set({ [PENDING_VIEW_KEY]: 'wordbook' });
+      await chrome.runtime.sendMessage({ type: 'OPEN_WORDBOOK' });
+    } catch { /* popup 没开 / 上下文失效时忽略 */ }
+    showToast('单词本已更新：可点插件图标 →「单词本」查看', 4000);
   }
 
   // ===== Save to Session（自动保存本次划词对话到聊天记录）=====

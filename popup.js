@@ -4,6 +4,8 @@ const ACTIVE_ID_KEY = 'llm_active_session_id';
 const CONFIG_KEY = 'llm_config';
 const MAX_SESSIONS = 50;
 const TOKEN_KEY = 'llm_total_tokens';
+const WORDBOOK_KEY = 'llm_wordbook';
+const PENDING_VIEW_KEY = 'llm_pending_view';
 const DEFAULT_TOKEN_LIMIT = 30000000;
 let TOKEN_BAR_MAX = DEFAULT_TOKEN_LIMIT;
 
@@ -140,6 +142,9 @@ let sessions = [];
 let activeSessionId = null;
 let config = null;
 let streamingSessionId = null;  // 正在流式的 session id，null 表示空闲
+let wordbook = [];              // 单词本条目（chrome.storage.local）
+let currentView = 'chat';       // 'chat' | 'wordbook'
+const wbExpanded = new Set();   // 已展开的词条 id
 
 // ===== DOM =====
 const sessionListEl = document.getElementById('sessionList');
@@ -153,6 +158,15 @@ const btnClear = document.getElementById('btnClear');
 const btnSettings = document.getElementById('btnSettings');
 const configBanner = document.getElementById('configBanner');
 const bannerGoSettings = document.getElementById('bannerGoSettings');
+const chatHeaderEl = document.getElementById('chatHeader');
+const inputAreaEl = document.getElementById('inputArea');
+const btnWordbook = document.getElementById('btnWordbook');
+const wordbookViewEl = document.getElementById('wordbookView');
+const wbListEl = document.getElementById('wbList');
+const wbEmptyEl = document.getElementById('wbEmpty');
+const wbSearchEl = document.getElementById('wbSearch');
+const wbTotalEl = document.getElementById('wbTotal');
+const wordbookCountEl = document.getElementById('wordbookCount');
 
 // 流式输出时自动贴底；用户一上滑就停，滑回底部再恢复（见 autoscroll.js）
 // 取不到控制器时降级为 null（等同于旧行为里不再自动滚动），不影响聊天主流程
@@ -160,10 +174,16 @@ const autoScroll = window.LumenAutoScroll ? window.LumenAutoScroll.create(messag
 
 // ===== Init =====
 async function init() {
-  const data = await chrome.storage.local.get([SESSIONS_KEY, ACTIVE_ID_KEY, TOKEN_KEY]);
+  const data = await chrome.storage.local.get([SESSIONS_KEY, ACTIVE_ID_KEY, TOKEN_KEY, WORDBOOK_KEY, PENDING_VIEW_KEY]);
   sessions = data[SESSIONS_KEY] || [];
   activeSessionId = data[ACTIVE_ID_KEY] || null;
   petTotalTokens = data[TOKEN_KEY] || 0;
+  wordbook = Array.isArray(data[WORDBOOK_KEY]) ? data[WORDBOOK_KEY] : [];
+  updateWordbookBadge();
+
+  // 划词面板点了「已存入单词本」后打开 Popup：直接落在单词本视图
+  const pendingView = data[PENDING_VIEW_KEY] || '';
+  if (pendingView) chrome.storage.local.remove(PENDING_VIEW_KEY);
 
   const cfgData = await chrome.storage.sync.get(CONFIG_KEY);
   config = cfgData[CONFIG_KEY] || null;
@@ -192,6 +212,8 @@ async function init() {
   // 初始化宠物猫
   updateTokenBar(0);
   petIdle();
+
+  if (pendingView === 'wordbook') setView('wordbook');
 }
 
 // ===== Session CRUD =====
@@ -237,6 +259,7 @@ function deleteSession(id) {
 function switchSession(id) {
   activeSessionId = id;
   chrome.storage.local.set({ [ACTIVE_ID_KEY]: id });
+  if (currentView !== 'chat') setView('chat');
   renderSidebar();
   renderMessages();
 }
@@ -899,6 +922,7 @@ function relativeTime(ts) {
 // ===== Event Listeners =====
 btnNewChat.addEventListener('click', () => {
   createSession();
+  if (currentView !== 'chat') setView('chat');
   userInputEl.focus();
 });
 
@@ -951,8 +975,13 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'OPEN_SESSION_FROM_SELECTION' && msg.activeSessionId) {
     activeSessionId = msg.activeSessionId;
     chrome.storage.local.set({ [ACTIVE_ID_KEY]: activeSessionId });
+    if (currentView !== 'chat') setView('chat');
     renderSidebar();
     renderMessages();
+  }
+  // 划词面板里点了「已存入单词本」
+  if (msg.type === 'OPEN_WORDBOOK') {
+    setView('wordbook');
   }
 });
 
@@ -1085,6 +1114,209 @@ function estimateTokens(text) {
   const rest = text.length - cjk;
   return Math.ceil(cjk / 1.5 + rest / 4);
 }
+
+// ===== Wordbook（单词本）=====
+function updateWordbookBadge() {
+  if (!wordbookCountEl) return;
+  wordbookCountEl.textContent = String(wordbook.length);
+  wordbookCountEl.classList.toggle('has-items', wordbook.length > 0);
+}
+
+function setView(view) {
+  const isWb = view === 'wordbook';
+  currentView = isWb ? 'wordbook' : 'chat';
+
+  wordbookViewEl.style.display = isWb ? 'flex' : 'none';
+  chatHeaderEl.style.display = isWb ? 'none' : '';
+  messagesEl.style.display = isWb ? 'none' : '';
+  inputAreaEl.style.display = isWb ? 'none' : '';
+  btnWordbook.classList.toggle('active', isWb);
+
+  if (isWb) {
+    configBanner.style.display = 'none';
+    chatTitleEl.textContent = '单词本';
+    renderWordbook();
+  } else {
+    if (!config || !config.apiKey) configBanner.style.display = 'flex';
+    const s = getActiveSession();
+    chatTitleEl.textContent = s ? displayTitle(s.title) : 'Lumen Ask';
+  }
+}
+
+async function persistWordbook() {
+  await chrome.storage.local.set({ [WORDBOOK_KEY]: wordbook });
+}
+
+function renderWordbook() {
+  if (!wbListEl) return;
+  const q = (wbSearchEl.value || '').trim().toLowerCase();
+  const items = wordbook.filter(e => {
+    if (!q) return true;
+    return `${e.term || ''}\n${e.result || ''}\n${e.title || ''}`.toLowerCase().includes(q);
+  });
+
+  wbTotalEl.textContent = wordbook.length ? '· ' + wordbook.length : '';
+  wbListEl.innerHTML = '';
+
+  if (items.length === 0) {
+    wbListEl.style.display = 'none';
+    wbEmptyEl.style.display = 'flex';
+    document.getElementById('wbEmptyTitle').textContent =
+      wordbook.length ? '没有匹配的条目' : '单词本还是空的';
+    document.getElementById('wbEmptySub').textContent =
+      wordbook.length ? '换个关键词试试' : '在网页里划词，点「翻译」就会自动收进来';
+    return;
+  }
+
+  wbListEl.style.display = 'block';
+  wbEmptyEl.style.display = 'none';
+
+  const frag = document.createDocumentFragment();
+  items.forEach(entry => {
+    const open = wbExpanded.has(entry.id);
+    const url = /^https?:/i.test(entry.url || '') ? entry.url : '';
+    const card = document.createElement('article');
+    card.className = 'wb-card' + (open ? ' open' : '');
+    card.dataset.id = entry.id;
+    card.innerHTML = `
+      <div class="wb-card-head">
+        <span class="wb-term" title="点击展开/收起">${escHtml(entry.term || '')}</span>
+        <span class="wb-time">${relativeTime(entry.updatedAt || entry.createdAt || Date.now())}</span>
+      </div>
+      <div class="wb-body">${LumenMD.render(entry.result || '')}</div>
+      <div class="wb-foot">
+        <button class="wb-btn" data-act="toggle">${open ? '收起' : '展开'}</button>
+        <button class="wb-btn" data-act="copy">复制</button>
+        ${url ? `<a class="wb-btn" href="${escHtml(url)}" target="_blank" rel="noopener noreferrer">原文</a>` : ''}
+        <button class="wb-btn danger" data-act="del">删除</button>
+        <span class="wb-meta" title="${escHtml(entry.title || '')}">${escHtml(entry.model || '')}</span>
+      </div>
+    `;
+    frag.appendChild(card);
+  });
+  wbListEl.appendChild(frag);
+}
+
+function toggleWordbookCard(id) {
+  if (wbExpanded.has(id)) wbExpanded.delete(id);
+  else wbExpanded.add(id);
+  const keepTop = wbListEl.scrollTop;
+  renderWordbook();
+  wbListEl.scrollTop = keepTop;
+}
+
+if (wbListEl) {
+  wbListEl.addEventListener('click', async e => {
+    const card = e.target.closest('.wb-card');
+    if (!card) return;
+    const id = card.dataset.id;
+    const actEl = e.target.closest('[data-act]');
+    const act = actEl ? actEl.dataset.act : '';
+
+    if (act === 'copy') {
+      const entry = wordbook.find(x => x.id === id);
+      if (!entry) return;
+      const text = entry.result || '';
+      try {
+        await navigator.clipboard.writeText(text);
+        const old = actEl.textContent;
+        actEl.textContent = '已复制';
+        setTimeout(() => { actEl.textContent = old; }, 1200);
+      } catch {
+        actEl.textContent = '复制失败';
+        setTimeout(() => { actEl.textContent = '复制'; }, 1200);
+      }
+      return;
+    }
+
+    if (act === 'del') {
+      wordbook = wordbook.filter(x => x.id !== id);
+      wbExpanded.delete(id);
+      await persistWordbook();
+      updateWordbookBadge();
+      renderWordbook();
+      return;
+    }
+
+    // 点展开按钮 / 标题 / 正文空白处：展开或收起（正文里的链接照常可点）
+    if (act === 'toggle' || (!act && !e.target.closest('a'))) {
+      toggleWordbookCard(id);
+    }
+  });
+}
+
+if (wbSearchEl) {
+  wbSearchEl.addEventListener('input', () => renderWordbook());
+}
+
+if (btnWordbook) {
+  btnWordbook.addEventListener('click', () => setView('wordbook'));
+}
+document.getElementById('btnWbBack')?.addEventListener('click', () => setView('chat'));
+
+// 清空：两段式确认（Popup 里 confirm() 不可靠）
+let wbClearArmed = false;
+let wbClearTimer = null;
+const btnWbClear = document.getElementById('btnWbClear');
+if (btnWbClear) {
+  btnWbClear.addEventListener('click', async () => {
+    if (wordbook.length === 0) return;
+    if (!wbClearArmed) {
+      wbClearArmed = true;
+      btnWbClear.textContent = '确认清空';
+      btnWbClear.classList.add('armed');
+      wbClearTimer = setTimeout(() => {
+        wbClearArmed = false;
+        btnWbClear.textContent = '清空';
+        btnWbClear.classList.remove('armed');
+      }, 3000);
+      return;
+    }
+    clearTimeout(wbClearTimer);
+    wbClearArmed = false;
+    btnWbClear.textContent = '清空';
+    btnWbClear.classList.remove('armed');
+    wordbook = [];
+    wbExpanded.clear();
+    await persistWordbook();
+    updateWordbookBadge();
+    renderWordbook();
+  });
+}
+
+const btnWbExport = document.getElementById('btnWbExport');
+if (btnWbExport) {
+  btnWbExport.addEventListener('click', () => {
+    if (wordbook.length === 0) return;
+    const lines = ['# Lumen Ask 单词本', '', `导出时间：${new Date().toLocaleString()}`, ''];
+    wordbook.forEach(e => {
+      lines.push(`## ${e.term || '(未命名词条)'}`);
+      const when = new Date(e.updatedAt || e.createdAt || Date.now()).toLocaleString();
+      lines.push(`> ${when}${e.model ? ' · ' + e.model : ''}${e.title ? ' · 来自《' + e.title + '》' : ''}`);
+      lines.push('');
+      lines.push(String(e.result || '').trim());
+      lines.push('');
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `lumen-wordbook-${new Date().toISOString().slice(0, 10)}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  });
+}
+
+// 划词面板存入新词条后，Popup 若开着就即时刷新
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes[WORDBOOK_KEY]) return;
+  const next = changes[WORDBOOK_KEY].newValue;
+  wordbook = Array.isArray(next) ? next : [];
+  updateWordbookBadge();
+  if (currentView === 'wordbook') renderWordbook();
+});
 
 // ===== Start =====
 init();

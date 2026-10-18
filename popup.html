@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <title>Lumen Ask</title>
+  <link rel="stylesheet" href="katex/katex.min.css">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
@@ -16,6 +17,15 @@
             <line x1="5" y1="12" x2="19" y2="12"></line>
           </svg>
           新对话
+        </button>
+
+        <button class="btn-wordbook" id="btnWordbook" title="打开单词本（划词「翻译」的结果都会收在这里）">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="flex-shrink:0">
+            <path d="M4 19.5A2.5 2.5 0 016.5 17H20"></path>
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"></path>
+          </svg>
+          <span class="btn-wordbook-text">单词本</span>
+          <span class="wordbook-count" id="wordbookCount">0</span>
         </button>
       </div>
 
@@ -52,7 +62,7 @@
       </div>
 
       <!-- 顶部栏 -->
-      <header class="chat-header">
+      <header class="chat-header" id="chatHeader">
         <span class="chat-title" id="chatTitle">Lumen Ask</span>
         <button class="btn-clear" id="btnClear" title="清空对话">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -75,7 +85,7 @@
       </div>
 
       <!-- 底部输入区 -->
-      <div class="input-area">
+      <div class="input-area" id="inputArea">
         <!-- 模型 combobox -->
         <div class="model-bar" id="modelBar">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;color:var(--text-muted)">
@@ -111,9 +121,34 @@
           </button>
         </div>
       </div>
+
+      <!-- 单词本：划词「翻译」的结果单独收在这里，不写进聊天记录 -->
+      <section class="wordbook-view" id="wordbookView" style="display:none;">
+        <header class="chat-header wb-header">
+          <span class="chat-title">单词本 <span class="wb-total" id="wbTotal"></span></span>
+          <div class="wb-actions">
+            <button class="btn-wb-text" id="btnWbExport" title="导出为 Markdown 文件">导出</button>
+            <button class="btn-wb-text danger" id="btnWbClear" title="清空单词本">清空</button>
+            <button class="btn-wb-text" id="btnWbBack" title="返回对话">对话</button>
+          </div>
+        </header>
+
+        <div class="wb-search-bar">
+          <input type="text" id="wbSearch" class="wb-search" placeholder="搜索单词 / 原句 / 释义…">
+        </div>
+
+        <div class="wb-list" id="wbList"></div>
+
+        <div class="wb-empty" id="wbEmpty" style="display:none;">
+          <div class="empty-icon">📖</div>
+          <p class="empty-title" id="wbEmptyTitle">单词本还是空的</p>
+          <p class="empty-sub" id="wbEmptySub">在网页里划词，点「翻译」就会自动收进来</p>
+        </div>
+      </section>
     </main>
   </div>
 
+  <script src="katex/katex.min.js"></script>
   <script src="md-renderer.js"></script>
   <script src="autoscroll.js"></script>
   <script src="popup.js"></script>
