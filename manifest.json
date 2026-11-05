@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Lumen Ask",
-  "version": "1.1.0",
-  "description": "Lumen Ask（流明）— 随行 AI 助手：网页划词即问、多会话历史、多模型自由切换",
+  "version": "1.3.0",
+  "description": "Lumen Ask（流明）— 随行 AI 助手：网页划词即问、多会话历史、DeepSeek 驱动",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -34,7 +34,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["katex/katex.min.js", "katex/katex-css.js", "md-renderer.js", "autoscroll.js", "content_script.js"],
+      "js": ["katex/katex.min.js", "katex/katex-css.js", "md-renderer.js", "autoscroll.js", "config-defaults.js", "content_script.js"],
       "css": ["content.css"],
       "run_at": "document_idle",
       "all_frames": true

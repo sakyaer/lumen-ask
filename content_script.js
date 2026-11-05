@@ -83,11 +83,22 @@
     try { return !!chrome.runtime?.id; } catch { return false; }
   }
 
+  // 交给 background 归一化存储里的旧配置（腾讯等），并补上 config.local.js 里的本地 Key
+  async function resolveCfg(stored) {
+    try {
+      const r = await chrome.runtime.sendMessage({ type: 'RESOLVE_CONFIG', cfg: stored });
+      if (r && r.cfg) return r.cfg;
+    } catch { /* background 未就绪时本地兜底 */ }
+    return (typeof LumenConfig !== 'undefined')
+      ? LumenConfig.resolveConfig(stored)
+      : (stored || null);
+  }
+
   async function loadConfig() {
     if (!isExtensionAlive()) { notifyContextDead(); return; }
     try {
       const data = await chrome.storage.sync.get(CONFIG_KEY);
-      cachedConfig = data[CONFIG_KEY] || null;
+      cachedConfig = await resolveCfg(data[CONFIG_KEY]);
     } catch { /* extension context invalidated, ignore */ }
   }
 
@@ -98,7 +109,7 @@
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === 'sync' && changes[CONFIG_KEY]) {
-        cachedConfig = changes[CONFIG_KEY].newValue || null;
+        resolveCfg(changes[CONFIG_KEY].newValue || null).then(cfg => { cachedConfig = cfg; });
       }
     });
   } catch { /* context already gone */ }
@@ -244,7 +255,7 @@
     return Math.min(h, 800);
   }
 
-  // 「配置」浮层：模型 / 思考深度都收在这里，避免常驻占地方
+  // 「配置」浮层：只放模型选择，避免常驻占地方
   function setConfigMenuOpen(open) {
     if (!shadowRoot) return;
     const menu = shadowRoot.getElementById('config-menu');
@@ -302,9 +313,7 @@
       titleEl.title = currentSelection;
     }
 
-    // 「体检」默认隐藏，每次打开面板都收起（右键「配置」可显隐）；配置浮层也收起
-    const thinkTestBtn = shadowRoot.getElementById('panel-think-test');
-    if (thinkTestBtn) thinkTestBtn.classList.remove('is-visible');
+    // 每次打开面板都收起「配置」浮层
     setConfigMenuOpen(false);
 
     // 渲染快捷按钮（使用缓存配置，无需 async）
@@ -360,7 +369,7 @@
           </div>
           <div class="header-actions">
             <div class="config-wrap" id="config-wrap">
-              <button class="config-btn" id="config-btn" title="配置：切换模型 / 思考深度" aria-label="配置">
+              <button class="config-btn" id="config-btn" title="配置：切换划词模型" aria-label="配置">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <circle cx="12" cy="12" r="3"></circle>
                   <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 008 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H2a2 2 0 010-4h.09A1.65 1.65 0 004.6 8a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V2a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H22a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"></path>
@@ -414,11 +423,6 @@
           <span class="ctrl-label">模型</span>
           <select id="panel-model-select" class="panel-select" title="划词使用的模型"></select>
         </label>
-        <label class="ctrl">
-          <span class="ctrl-label">思考深度</span>
-          <select id="panel-think-select" class="panel-select" title="划词的思考强度"></select>
-        </label>
-        <button id="panel-think-test" class="panel-mini-btn" title="实测哪个思考参数真正生效（默认隐藏，右键此处可显隐）">体检</button>
       </div>
     `;
   }
@@ -600,25 +604,6 @@
       }
       .panel-select:focus { border-color: #1CB0F6; box-shadow: 0 2px 0 #0090D4; }
       .panel-select option { color: #3C3C3C; background: #FFFFFF; }
-      .panel-mini-btn {
-        flex-shrink: 0;
-        font-size: 10px;
-        font-weight: 800;
-        font-family: inherit;
-        color: #0090D4;
-        background: #E8F4FF;
-        border: 1.5px solid #0090D4;
-        border-radius: 8px;
-        padding: 3px 8px;
-        cursor: pointer;
-        box-shadow: 0 2px 0 #0090D4;
-      }
-      .panel-mini-btn:hover:not(:disabled) { background: #D6ECFF; }
-      .panel-mini-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-      /* 「体检」默认隐藏，右键齿轮区域可显隐 */
-      #panel-think-test { display: none; }
-      #panel-think-test.is-visible { display: inline-flex; align-items: center; align-self: flex-start; }
-
       .close-btn {
         width: 24px; height: 24px;
         background: #F0F0F0;
@@ -997,14 +982,14 @@
       else openPopupForSession();
     });
 
-    // 面板内直接切模型 / 调思考强度（写回配置，与设置页同步）
+    // 面板内直接切模型（写回配置，与设置页同步）
     const patchConfig = async (patch) => {
       try {
         const data = await chrome.storage.sync.get(CONFIG_KEY);
         const cfg = data[CONFIG_KEY] || {};
         Object.assign(cfg, patch);
         await chrome.storage.sync.set({ [CONFIG_KEY]: cfg });
-        cachedConfig = cfg;
+        cachedConfig = await resolveCfg(cfg);
       } catch (e) {
         if (isInvalidatedError(e)) notifyContextDead();
       }
@@ -1018,19 +1003,7 @@
       });
     }
 
-    const thinkSelect = shadowRoot.getElementById('panel-think-select');
-    if (thinkSelect) {
-      thinkSelect.addEventListener('change', () => {
-        patchConfig({ selectionReasoningEffort: thinkSelect.value });
-      });
-    }
-
-    const thinkTestBtn = shadowRoot.getElementById('panel-think-test');
-    if (thinkTestBtn) {
-      thinkTestBtn.addEventListener('click', () => runPanelThinkTest());
-    }
-
-    // 齿轮浮层：模型 / 思考深度都在里面，点其他地方自动收起
+    // 齿轮浮层：划词模型选择，点其他地方自动收起
     const configBtn = shadowRoot.getElementById('config-btn');
     const configMenu = shadowRoot.getElementById('config-menu');
     const configWrap = shadowRoot.getElementById('config-wrap');
@@ -1046,65 +1019,6 @@
       if (configMenu.contains(e.target)) return;
       setConfigMenuOpen(false);
     });
-
-    // 「体检」默认隐藏（暂时用不上）：右键齿轮按钮 / 浮层才显隐，避免日常误点
-    const toggleThinkTest = e => {
-      e.preventDefault();
-      if (thinkTestBtn) thinkTestBtn.classList.toggle('is-visible');
-    };
-    if (configWrap) configWrap.addEventListener('contextmenu', toggleThinkTest);
-    if (configMenu) configMenu.addEventListener('contextmenu', toggleThinkTest);
-  }
-
-  // 面板内置的思考参数体检：同一问题用不同思考参数各请求一次，直接看哪行真正生效
-  async function runPanelThinkTest() {
-    if (isStreaming) return;
-    setConfigMenuOpen(false);   // 收起浮层，让体检结果完整露出来
-
-    const btn = shadowRoot.getElementById('panel-think-test');
-    const replyArea = shadowRoot.getElementById('reply-area');
-    const replyContent = shadowRoot.getElementById('reply-content');
-    const statusEl = shadowRoot.getElementById('reply-status');
-
-    replyArea.style.display = 'block';
-    replyContent.textContent = '正在用同一个问题分别测试不同思考参数，请稍候…';
-    if (statusEl) statusEl.textContent = '';
-    if (btn) { btn.disabled = true; btn.textContent = '测试中'; }
-
-    try {
-      const data = await chrome.storage.sync.get(CONFIG_KEY);
-      const cfg = data[CONFIG_KEY];
-      if (!cfg || !cfg.apiKey) {
-        replyContent.textContent = '⚠ 请先在插件设置中配置 API Key';
-        return;
-      }
-      const model = cfg.selectionModel || cfg.model;
-      const r = await chrome.runtime.sendMessage({
-        type: 'THINK_TEST',
-        payload: { cfg: { ...cfg, model }, model }
-      });
-
-      if (!r || !r.results) {
-        replyContent.textContent = '⚠ 体检失败：' + ((r && r.error) || '后台无返回');
-        return;
-      }
-
-      const lines = [`模型 ${r.model} ｜ 协议 ${r.protocol}`, ''];
-      r.results.forEach(x => {
-        lines.push(`${x.variant}　${x.verdict || ''}`);
-        lines.push(`　耗时 ${x.elapsedMs}ms ｜ 思考 ${x.reasoningLen} 字 ｜ 正文 ${x.contentLen} 字`);
-        if (x.error) lines.push(`　错误：${String(x.error).slice(0, 100)}`);
-        lines.push('');
-      });
-      lines.push('想不思考：挑标了「✅ 关掉了思考」的那行，把上面的「思考」下拉设成对应值。');
-      lines.push('想深度思考：Claude 端点选 medium / high / xhigh / max（发 adaptive + effort），OpenAI 端点选 minimal / low / medium / high。');
-      lines.push('如果每一行都在思考或超时，说明这个端点不支持关闭思考，建议把模型换成非推理模型（如 glm-5.3）。');
-      replyContent.textContent = lines.join('\n');
-    } catch (e) {
-      replyContent.textContent = '⚠ ' + (e.message || '体检失败');
-    } finally {
-      if (btn) { btn.disabled = false; btn.textContent = '体检'; }
-    }
   }
 
   // 翻译按钮的提示词：单词给音标 / 词根 / 助记 / 联想，句子给译文 + 关键词拆解
@@ -1193,72 +1107,19 @@
     });
 
     renderModelSelect(cfg);
-    renderThinkSelect(cfg);
   }
 
-  // 划词面板可切换的模型：与设置页「划词使用的模型」同一套，按厂商分组
+  // 划词面板可切换的模型：与设置页「划词使用的模型」同一套
   const PANEL_MODEL_GROUPS = [
     {
       label: '',
       options: [{ value: '', label: '跟随主配置' }],
     },
     {
-      label: '腾讯 Token Plan',
-      options: [
-        { value: 'tc-code-latest', label: 'Auto（智能路由）' },
-        { value: 'hy4-preview', label: 'Hy4 Preview（混元）' },
-        { value: 'hy3', label: 'Hy3（混元）' },
-        // 腾讯云 TokenHub 官方 model 参数（2026-09-10 上线，1M 上下文 / 384k 输出）
-        { value: 'deepseek/deepseek-flash', label: 'DeepSeek V4.1 Flash 原厂直供（最新）' },
-        { value: 'deepseek-v4-pro-202606', label: 'DeepSeek V4 Pro 正式版' },
-        { value: 'deepseek-v4-flash-202605', label: 'DeepSeek V4 Flash 正式版' },
-        { value: 'glm-5.3', label: 'GLM-5.3' },
-        { value: 'glm-5.3-flash', label: 'GLM-5.3-Flash' },
-        { value: 'glm-5.3-flashx', label: 'GLM-5.3-FlashX' },
-        { value: 'glm-5.2', label: 'GLM-5.2' },
-        { value: 'minimax-m3', label: 'MiniMax M3' },
-        { value: 'minimax-m2.7', label: 'MiniMax M2.7' },
-        { value: 'kimi-k3', label: 'Kimi K3' },
-        { value: 'kimi-k2.8-preview', label: 'Kimi K2.8 Preview' },
-        { value: 'kimi-k2.7-code', label: 'Kimi K2.7 Code' },
-      ],
-    },
-    {
-      label: 'OpenAI',
-      options: [
-        { value: 'gpt-6-astra', label: 'GPT-6 Astra（最新旗舰）' },
-        { value: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
-        { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
-        { value: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
-        { value: 'gpt-5.5', label: 'GPT-5.5' },
-        { value: 'gpt-5.4', label: 'GPT-5.4' },
-        { value: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
-        { value: 'gpt-5.4-nano', label: 'GPT-5.4 Nano' },
-        { value: 'gpt-5.2', label: 'GPT-5.2（旧版）' },
-        { value: 'gpt-5.1', label: 'GPT-5.1（旧版）' },
-      ],
-    },
-    {
-      label: 'Anthropic Claude',
-      options: [
-        { value: 'claude-fable-5', label: 'Claude Fable 5（最强）' },
-        { value: 'claude-opus-5', label: 'Claude Opus 5' },
-        { value: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
-        { value: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
-      ],
-    },
-    {
       label: 'DeepSeek',
       options: [
         { value: 'deepseek-flash', label: 'DeepSeek V4.1 Flash（最新）' },
-        { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
-      ],
-    },
-    {
-      label: '通义千问',
-      options: [
-        { value: 'qwen3.8-max', label: '通义千问 3.8-Max' },
-        { value: 'qwen3.7-plus', label: '通义千问 3.7-Plus' },
+        { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro（更强，深度思考）' },
       ],
     },
   ];
@@ -1305,47 +1166,6 @@
     sel.title = `划词使用的模型：${current || mainModel || '跟随主配置'}`;
   }
 
-  // 划词思考强度：面板上直接可调，'' 表示不向接口发送该参数
-  // 列表对各端点是共用的：Claude 端认 low/medium/high/xhigh/max，
-  // OpenAI 端认 minimal/low/medium/high，腾讯混元认 no_think
-  const THINK_OPTIONS = [
-    { value: 'no_think', label: '不思考 no_think' },
-    { value: 'minimal', label: '最快 minimal' },
-    { value: 'low', label: '低 low' },
-    { value: 'medium', label: '中 medium' },
-    { value: 'high', label: '高 high（Claude 默认）' },
-    { value: 'xhigh', label: '更高 xhigh（Claude）' },
-    { value: 'max', label: '最深 max（Claude）' },
-    { value: '', label: '不发送参数' },
-  ];
-
-  function currentThinkValue(cfg) {
-    let cur = cfg ? cfg.selectionReasoningEffort : undefined;
-    if (cur === undefined) cur = 'no_think';   // 未配置时默认不思考
-    return cur;
-  }
-
-  function renderThinkSelect(cfg) {
-    const sel = shadowRoot.getElementById('panel-think-select');
-    if (!sel) return;
-
-    const cur = currentThinkValue(cfg);
-    const opts = THINK_OPTIONS.map(o => ({ ...o }));
-    // 用户在设置页填了自定义值时补一项
-    if (cur && !opts.some(o => o.value === cur)) {
-      opts.splice(opts.length - 1, 0, { value: cur, label: cur });
-    }
-
-    sel.innerHTML = '';
-    opts.forEach(o => {
-      const opt = document.createElement('option');
-      opt.value = o.value;
-      opt.textContent = o.label;
-      sel.appendChild(opt);
-    });
-    sel.value = cur;
-  }
-
   function handleCustomSend() {
     if (isStreaming) return;
     const input = shadowRoot.getElementById('custom-input');
@@ -1365,7 +1185,7 @@
     let cfg;
     try {
       const cfgData = await chrome.storage.sync.get(CONFIG_KEY);
-      cfg = cfgData[CONFIG_KEY];
+      cfg = await resolveCfg(cfgData[CONFIG_KEY]);
     } catch (err) {
       notifyContextDead();
       showReply('⚠ 插件已更新，请刷新本页面后再试', true);
@@ -1382,13 +1202,8 @@
     // 划词面板支持独立选择模型：cfg.selectionModel 优先，其次跟随主配置
     if (cfg.selectionModel) cfg = { ...cfg, model: cfg.selectionModel };
 
-    // 划词思考强度：面板 / 设置页都能直接调，未配置时默认 no_think（不思考）。
-    // '' 表示不向接口发送该参数。刻意不回落到全局设置，保证「划词=快」的预期可预测。
-    cfg = { ...cfg, reasoningEffort: currentThinkValue(cfg) };
-
     lastUsedModel = cfg.model || null;
     renderModelSelect(cfg);
-    renderThinkSelect(cfg);
 
     lastMessages = messages;
 
@@ -1418,15 +1233,10 @@
     try {
       await streamChat(cfg, messages, {
         onStatus: () => setStatus('已连接，等待模型输出…'),
-        // 推理模型（hy4-preview 等）先吐思考过程，这里明确提示，避免看起来像卡死
+        // 推理阶段会先吐思考过程，这里明确提示，避免看起来像卡死
         onReasoning: (_text, len) => {
           if (loading) loading.style.display = 'none';
-          // 明明设了「不思考」却还在思考 → 直接点明是端点不认这个参数，别让用户以为配置没保存
-          const eff = cfg.reasoningEffort;
-          const shouldBeOff = eff === 'no_think' || eff === 'minimal' || eff === 'low';
-          setStatus(shouldBeOff
-            ? `思考中…（${len || 0} 字）· 设置未生效`
-            : `模型思考中…（${len || 0} 字）`);
+          setStatus(`模型思考中…（${len || 0} 字）`);
         },
         onChunk: chunk => {
           if (loading) loading.style.display = 'none';
@@ -1811,7 +1621,6 @@
       enableSelection: cachedConfig ? cachedConfig.enableSelection : '(未配置)',
       model: cachedConfig ? (cachedConfig.selectionModel || cachedConfig.model) : '(未配置)',
       baseUrl: cachedConfig ? cachedConfig.baseUrl : '(未配置)',
-      reasoningEffort: cachedConfig ? (cachedConfig.reasoningEffort || '(默认)') : '(未配置)',
       hasApiKey: !!(cachedConfig && cachedConfig.apiKey),
       floatBtnInDom: !!floatBtn && floatBtn.isConnected,
       panelInDom: !!shadowHost && shadowHost.isConnected,
@@ -1827,12 +1636,12 @@
     let cfg;
     try {
       const cfgData = await chrome.storage.sync.get(CONFIG_KEY);
-      cfg = cfgData[CONFIG_KEY];
+      cfg = await resolveCfg(cfgData[CONFIG_KEY]);
     } catch (e) {
       console.warn(LOG_PREFIX, '上下文已失效，请刷新页面后重试');
       return null;
     }
-    if (!cfg) { console.warn(LOG_PREFIX, '尚未配置 API Key / 模型'); return null; }
+    if (!cfg || !cfg.apiKey) { console.warn(LOG_PREFIX, '尚未配置 API Key / 模型'); return null; }
 
     const model = overrideModel || cfg.selectionModel || cfg.model;
     console.info(LOG_PREFIX, `探测中 → model=${model}, baseUrl=${cfg.baseUrl}`);
@@ -1841,30 +1650,6 @@
       payload: { cfg: { ...cfg, model }, messages: [{ role: 'user', content: '请只回复：pong' }] }
     });
     console.log(LOG_PREFIX, '探测结果：', r);
-    return r;
-  };
-
-  // 思考参数体检：同一问题用不同思考参数各请求一次，实测哪个真正生效
-  // 用法：控制台执行 await __lumenAskThinkTest()  或  await __lumenAskThinkTest('hy4-preview')
-  window.__lumenAskThinkTest = async (overrideModel) => {
-    let cfg;
-    try {
-      const cfgData = await chrome.storage.sync.get(CONFIG_KEY);
-      cfg = cfgData[CONFIG_KEY];
-    } catch (e) {
-      console.warn(LOG_PREFIX, '上下文已失效，请刷新页面后重试');
-      return null;
-    }
-    if (!cfg) { console.warn(LOG_PREFIX, '尚未配置 API Key / 模型'); return null; }
-
-    const model = overrideModel || cfg.selectionModel || cfg.model;
-    console.info(LOG_PREFIX, `正在对 model=${model} 做思考参数体检（多次请求，请稍候）…`);
-    const r = await chrome.runtime.sendMessage({
-      type: 'THINK_TEST',
-      payload: { cfg: { ...cfg, model }, model }
-    });
-    if (r && r.results) console.table(r.results);
-    console.log(LOG_PREFIX, '体检结果：', r);
     return r;
   };
 
@@ -1886,7 +1671,6 @@
   // 旧名别名：改名（LLM Chat → Lumen Ask）前的控制台调用习惯继续可用
   window.__llmChatDiag = window.__lumenAskDiag;
   window.__llmChatProbe = window.__lumenAskProbe;
-  window.__llmChatThinkTest = window.__lumenAskThinkTest;
   window.__llmChatReboot = window.__lumenAskReboot;
 
 })();

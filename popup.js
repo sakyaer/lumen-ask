@@ -9,74 +9,20 @@ const PENDING_VIEW_KEY = 'llm_pending_view';
 const DEFAULT_TOKEN_LIMIT = 30000000;
 let TOKEN_BAR_MAX = DEFAULT_TOKEN_LIMIT;
 
-// 各厂商模型组，key = 识别前缀/关键词，用于匹配当前 baseUrl 或 model
+// 把 storage 中的配置归一化为 DeepSeek（config-defaults.js 提供），
+// 并补上 config.local.js 里的本地 Key。
+function resolveCfg(stored) {
+  return window.LumenConfig ? LumenConfig.resolveConfig(stored) : (stored || null);
+}
+
+// 统一使用 DeepSeek 官方 API：baseUrl 匹配到 deepseek（或尚未配置）时展示这两个模型
 const MODEL_GROUPS = [
   {
-    label: 'OpenAI',
-    match: cfg => !cfg.baseUrl || cfg.baseUrl.includes('openai.com'),
-    models: [
-      { id: 'gpt-6-astra',   name: 'GPT-6 Astra（最新旗舰）' },
-      { id: 'gpt-5.6-sol',   name: 'GPT-5.6 Sol' },
-      { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
-      { id: 'gpt-5.6-luna',  name: 'GPT-5.6 Luna' },
-      { id: 'gpt-5.5',       name: 'GPT-5.5' },
-      { id: 'gpt-5.4',       name: 'GPT-5.4' },
-      { id: 'gpt-5.4-mini',  name: 'GPT-5.4 Mini' },
-      { id: 'gpt-5.4-nano',  name: 'GPT-5.4 Nano' },
-      { id: 'gpt-5.2',       name: 'GPT-5.2（旧版）' },
-      { id: 'gpt-5.1',       name: 'GPT-5.1（旧版）' },
-    ]
-  },
-  {
-    label: 'Anthropic',
-    match: cfg => cfg.baseUrl && cfg.baseUrl.includes('anthropic.com'),
-    models: [
-      { id: 'claude-fable-5',           name: 'Fable 5（最强）' },
-      { id: 'claude-opus-5',            name: 'Opus 5' },
-      { id: 'claude-sonnet-5',          name: 'Sonnet 5' },
-      { id: 'claude-haiku-4-5-20251001',name: 'Haiku 4.5' },
-    ]
-  },
-  {
-    label: '腾讯 Token Plan',
-    match: cfg => cfg.baseUrl && cfg.baseUrl.includes('lkeap'),
-    models: [
-      { id: 'tc-code-latest',             name: 'Auto（智能路由）' },
-      // 通用 Token Plan
-      { id: 'hy4-preview',                name: 'Hy4 Preview（混元）' },
-      { id: 'deepseek/deepseek-flash',    name: 'DeepSeek V4.1 Flash（最新）' },
-      { id: 'deepseek-v4-pro-202606',     name: 'DeepSeek V4 Pro 正式版' },
-      { id: 'deepseek-v4-flash-202605',   name: 'DeepSeek V4 Flash 正式版' },
-      { id: 'glm-5.3',                    name: 'GLM-5.3' },
-      { id: 'glm-5.3-flash',              name: 'GLM-5.3-Flash' },
-      { id: 'glm-5.3-flashx',             name: 'GLM-5.3-FlashX' },
-      { id: 'glm-5.2',                    name: 'GLM-5.2' },
-      { id: 'minimax-m3',                 name: 'MiniMax M3' },
-      { id: 'minimax-m2.7',               name: 'MiniMax M2.7' },
-      { id: 'kimi-k3',                    name: 'Kimi K3' },
-      { id: 'kimi-k2.8-preview',          name: 'Kimi K2.8 Preview' },
-      { id: 'kimi-k2.7-code',             name: 'Kimi K2.7 Code' },
-      // Hy Token Plan
-      { id: 'hy3',                        name: 'Hy3（混元）' },
-      // 2026-10 下线，保留给老配置
-      { id: 'glm-5.1',                    name: 'GLM-5.1（旧）' },
-      { id: 'glm-5',                      name: 'GLM-5（旧）' },
-    ]
-  },
-  {
     label: 'DeepSeek',
-    match: cfg => cfg.baseUrl && cfg.baseUrl.includes('deepseek'),
+    match: cfg => !cfg.baseUrl || cfg.baseUrl.includes('deepseek'),
     models: [
-      { id: 'deepseek-flash', name: 'V4.1 Flash（最新）' },
-      { id: 'deepseek-v4-pro', name: 'V4 Pro' },
-    ]
-  },
-  {
-    label: '通义千问',
-    match: cfg => cfg.baseUrl && (cfg.baseUrl.includes('aliyun') || cfg.baseUrl.includes('dashscope') || cfg.baseUrl.includes('qwen')),
-    models: [
-      { id: 'qwen3.8-max',  name: '3.8-Max' },
-      { id: 'qwen3.7-plus', name: '3.7-Plus' },
+      { id: 'deepseek-flash',     name: 'DeepSeek V4.1 Flash（最新）' },
+      { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro（更强，深度思考）' },
     ]
   },
 ];
@@ -186,7 +132,7 @@ async function init() {
   if (pendingView) chrome.storage.local.remove(PENDING_VIEW_KEY);
 
   const cfgData = await chrome.storage.sync.get(CONFIG_KEY);
-  config = cfgData[CONFIG_KEY] || null;
+  config = resolveCfg(cfgData[CONFIG_KEY]);
   TOKEN_BAR_MAX = config?.tokenLimit || DEFAULT_TOKEN_LIMIT;
 
   // Apply theme
@@ -364,7 +310,7 @@ async function sendMessage() {
   if (!text) return;
 
   const cfgData = await chrome.storage.sync.get(CONFIG_KEY);
-  config = cfgData[CONFIG_KEY] || null;
+  config = resolveCfg(cfgData[CONFIG_KEY]);
 
   if (!config || !config.apiKey) {
     configBanner.style.display = 'flex';
@@ -407,7 +353,7 @@ async function sendMessage() {
             contentEl.innerHTML = '<span class="msg-status">已连接，等待模型输出…</span><span class="cursor"></span>';
           }
         },
-        // 推理模型（hy4-preview 等）先出思考过程，明确提示避免看起来像卡死
+        // 推理阶段会先输出思考过程，明确提示避免看起来像卡死
         onReasoning: (_t, len) => {
           if (activeSessionId === thisSessionId && !fullReply) {
             contentEl.innerHTML = `<span class="msg-status">模型思考中…（${len || 0} 字）</span><span class="cursor"></span>`;
@@ -465,7 +411,7 @@ async function sendMessage() {
 }
 
 // ===== Stream Chat =====
-// 首个数据块最长等待：推理模型（hy4-preview 深度思考）较慢，给足 90s
+// 首个数据块最长等待：DeepSeek 思考较慢，给足 90s
 const FIRST_BYTE_TIMEOUT_MS = 90000;
 const IDLE_TIMEOUT_MS = 90000;
 
@@ -483,112 +429,8 @@ function readWithTimeout(reader, ms, isFirst) {
   ]).finally(() => clearTimeout(timer));
 }
 
-// 思考强度：腾讯系认 no_think，OpenAI 系只认 low/minimal
-function normalizeReasoningEffort(baseUrl, value) {
-  if (!value) return null;
-  const v = String(value).trim().toLowerCase();
-  if (isTencentBase(baseUrl)) return v;
-  // minimal 是 OpenAI 的档位，Anthropic 没有；两者都当"最浅"处理
-  if (v === 'no_think') return 'low';
-  if (v === 'minimal') return 'low';
-  return v;
-}
-
-function isTencentBase(baseUrl) {
-  const u = String(baseUrl || '').toLowerCase();
-  return u.includes('lkeap') || u.includes('tencentmaas') ||
-         u.includes('tencent') || u.includes('hunyuan');
-}
-
-// Anthropic 的思考深度（output_config.effort）：low / medium / high / xhigh / max
-// 旧档位别名一律拉到 low，否则会被网关当成非法值报 400
-const ANTHROPIC_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
-const ANTHROPIC_EFFORT_ALIAS = {
-  minimal: 'low', lowest: 'low', none: 'low', off: 'low', light: 'low',
-  mid: 'medium', normal: 'medium', default: 'medium',
-  deep: 'high', deeper: 'xhigh', deeperer: 'xhigh', ultra: 'max', ultrathink: 'max',
-};
-
-function anthropicEffortValue(v) {
-  if (ANTHROPIC_EFFORT_LEVELS.includes(v)) return v;
-  return ANTHROPIC_EFFORT_ALIAS[v] || 'high';
-}
-
-// 旧版 Anthropic 只认 budget_tokens，给每个档位一个合理的显式预算
-// （必须 >= 1024 且 < max_tokens，max_tokens 过小时 sendWithReasoning 会自动退到下一组）
-const ANTHROPIC_BUDGET = { low: 1024, medium: 2048, high: 4096, xhigh: 8192, max: 16384 };
-
-// 明知道自己不吃 budget_tokens 的新模型（Opus 5 / Fable 5 / Sonnet 5 等）先试 adaptive，
-// 免得白白多发一次注定 400 的请求；老模型（Haiku 4.5 等）反过来先试 budget_tokens。
-const ANTHROPIC_ADAPTIVE_MODEL = /(opus|sonnet)-5|fable-5|opus-4-(6|7|8)|sonnet-4-6|mythos/i;
-
-function anthropicCandidates(model, effort) {
-  const v = normalizeReasoningEffort('', effort);
-  if (!v) return [{ label: 'none', params: {} }];
-  // normalizeReasoningEffort 已把 no_think / minimal 归一到 low
-  const effortValue = anthropicEffortValue(v);
-
-  // 关闭思考：新老模型都认 disabled；老的还认 budget_tokens:0
-  if (v === 'no_think' || v === 'minimal' || v === 'low') {
-    return [
-      { label: 'thinking:disabled', params: { thinking: { type: 'disabled' } } },
-      { label: 'thinking-budget-0', params: { thinking: { type: 'enabled', budget_tokens: 0 } } },
-    ];
-  }
-
-  // 新版：thinking.type=adaptive + output_config.effort（闭区间，不传 budget_tokens）
-  const adaptive = {
-    label: `adaptive-effort:${effortValue}`,
-    params: { thinking: { type: 'adaptive' }, output_config: { effort: effortValue } },
-  };
-  // 旧版：thinking.type=enabled + budget_tokens（必须 >= 1024 且 < max_tokens）
-  const legacy = {
-    label: `legacy-budget:${effortValue}`,
-    params: { thinking: { type: 'enabled', budget_tokens: ANTHROPIC_BUDGET[effortValue] || 1024 } },
-  };
-
-  return ANTHROPIC_ADAPTIVE_MODEL.test(String(model || '')) ? [adaptive, legacy] : [legacy, adaptive];
-}
-
-// 关闭思考的写法各家不同，按"一次命中率"排序列出所有候选（与 background.js 保持一致）：
-// Anthropic 系 thinking:{type:"adaptive"|"disabled"}+output_config.effort（旧模型退回 budget_tokens）/
-// GLM 系 thinking:{type:"disabled"} / Qwen 系 enable_thinking:false /
-// OpenAI 系 reasoning_effort:low / 腾讯文档 reasoningEffort（驼峰）/ 兜底 thinking_budget:0
-function reasoningCandidates(baseUrl, effort, isAnthropic, model) {
-  const v = normalizeReasoningEffort(baseUrl, effort);
-  if (!v) return [{ label: 'none', params: {} }];
-
-  if (isAnthropic) return anthropicCandidates(model, effort);
-
-  const isTencent = isTencentBase(baseUrl);
-  const isLow = v === 'no_think' || v === 'minimal' || v === 'low';
-
-  if (isLow) {
-    const allOff = {
-      enable_thinking: false,
-      thinking: { type: 'disabled' },
-      thinking_budget: 0,
-      reasoning_effort: v,
-    };
-    if (isTencent) allOff.reasoningEffort = v;
-
-    return [
-      { label: 'all-off', params: allOff },
-      { label: 'thinking:disabled', params: { thinking: { type: 'disabled' } } },
-      { label: 'enable_thinking=false', params: { enable_thinking: false } },
-      { label: 'reasoning_effort', params: { reasoning_effort: v } },
-      { label: 'reasoningEffort(驼峰)', params: { reasoningEffort: v } },
-      { label: 'thinking_budget=0', params: { thinking_budget: 0 } },
-    ];
-  }
-
-  const hi = { reasoning_effort: v };
-  if (isTencent) hi.reasoningEffort = v;
-  return [{ label: 'reasoning_effort', params: hi }];
-}
-
-const paramProfile = new Map();
-
+// DeepSeek 走标准 OpenAI 兼容协议，不需要任何思考强度参数：
+// 模型清单：deepseek-flash（V4.1 Flash）/ deepseek-v4-pro（V4 Pro）。
 function httpErrMsg(status, text) {
   let msg = `HTTP ${status}`;
   try {
@@ -598,77 +440,43 @@ function httpErrMsg(status, text) {
   return String(msg);
 }
 
-async function sendWithReasoning(doFetch, baseUrl, effort, isAnthropic, model) {
-  const cands = reasoningCandidates(baseUrl, effort, isAnthropic, model);
-  const key = `${baseUrl}|${model || ''}|${effort || ''}|${isAnthropic ? 'a' : 'o'}`;
-
-  const order = [];
-  const cached = paramProfile.get(key);
-  if (cached) order.push(cached);
-  for (const c of cands) if (!cached || c.label !== cached.label) order.push(c);
-  if (!order.some(c => c.label === 'none')) order.push({ label: 'none', params: {} });
-
-  let lastStatus = 0;
-  let lastText = '';
-
-  for (const c of order) {
-    let resp;
-    try {
-      resp = await doFetch(c.params);
-    } catch (e) {
-      throw new Error((e && e.message) || 'Failed to fetch');
-    }
-    if (resp.ok) {
-      paramProfile.set(key, c);
-      return resp;
-    }
-    lastText = await resp.text();
-    lastStatus = resp.status;
-
-    const retriable = resp.status === 400 &&
-      /reasoning|thinking|parameter|unknown|unsupported|invalid|unexpected/i.test(lastText);
-    if (!retriable) throw new Error(httpErrMsg(lastStatus, lastText));
+// 发一次请求；HTTP 非 2xx 时抛出带接口信息的错误
+async function fetchChat(doFetch) {
+  let resp;
+  try {
+    resp = await doFetch();
+  } catch (e) {
+    throw new Error((e && e.message) || 'Failed to fetch');
   }
-
-  throw new Error(httpErrMsg(lastStatus, lastText));
+  if (!resp.ok) throw new Error(httpErrMsg(resp.status, await resp.text()));
+  return resp;
 }
 
 // handlers: { onChunk, onStatus, onReasoning }
 async function streamChat(cfg, messages, handlers) {
   const h = typeof handlers === 'function' ? { onChunk: handlers } : (handlers || {});
-  const baseUrl = (cfg.baseUrl || 'https://api.openai.com/v1').replace(/\/$/, '');
-  const isAnthropic = baseUrl.toLowerCase().includes('anthropic');
-
-  if (isAnthropic) {
-    await streamChatAnthropic(cfg, baseUrl, messages, h);
-  } else {
-    await streamChatOpenAI(cfg, baseUrl, messages, h);
-  }
+  const baseUrl = (cfg.baseUrl || 'https://api.deepseek.com').replace(/\/$/, '');
+  await streamChatOpenAI(cfg, baseUrl, messages, h);
 }
 
-// ===== OpenAI-compatible =====
+// ===== OpenAI-compatible（DeepSeek）=====
 async function streamChatOpenAI(cfg, baseUrl, messages, h) {
-  const doFetch = (params) => {
-    const body = {
-      model: cfg.model || 'gpt-5',
-      messages: cfg.systemPrompt
-        ? [{ role: 'system', content: cfg.systemPrompt }, ...messages]
-        : messages,
-      stream: true
-    };
-    Object.assign(body, params);
-    return fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${cfg.apiKey}`
-      },
-      body: JSON.stringify(body)
-    });
+  const body = {
+    model: cfg.model || 'deepseek-flash',
+    messages: cfg.systemPrompt
+      ? [{ role: 'system', content: cfg.systemPrompt }, ...messages]
+      : messages,
+    stream: true
   };
 
-  const resp = await sendWithReasoning(doFetch, baseUrl, cfg.reasoningEffort, false, cfg.model);
-  if (!resp.ok) throw new Error(httpErrMsg(resp.status, await resp.text()));
+  const resp = await fetchChat(() => fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${cfg.apiKey}`
+    },
+    body: JSON.stringify(body)
+  }));
 
   if (h.onStatus) h.onStatus('connected');
 
@@ -741,7 +549,7 @@ async function streamChatOpenAI(cfg, baseUrl, messages, h) {
         const choice = data.choices?.[0];
         const delta = choice?.delta || {};
 
-        // 推理模型的思考过程放在 reasoning_content
+        // 思考过程放在 reasoning_content
         const reasoning = delta.reasoning_content || delta.reasoning || '';
         if (reasoning) {
           gotReasoning = true;
@@ -767,116 +575,11 @@ async function streamChatOpenAI(cfg, baseUrl, messages, h) {
     if (gotReasoning && reasoningBuf.trim()) {
       if (h.onChunk) {
         h.onChunk(`（模型只输出了思考过程、没有生成正式回复，以下是它的思考内容。\n`
-                + `可将「思考强度」设为 no_think，或换用非推理模型）\n\n` + reasoningBuf.trim());
+                + `可以改用 DeepSeek V4.1 Flash，或稍后重试）\n\n` + reasoningBuf.trim());
       }
       return;
     }
-    throw new Error('模型没有返回任何内容。请检查模型名与 Base URL 是否匹配（腾讯 OpenAI 兼容为 /plan/v3，Anthropic 兼容为 /plan/anthropic）');
-  }
-}
-
-// ===== Anthropic-compatible =====
-async function streamChatAnthropic(cfg, baseUrl, messages, h) {
-  // Convert messages: filter out system messages, convert content to Anthropic format
-  const userMessages = messages
-    .filter(m => m.role !== 'system')
-    .map(m => ({
-      role: m.role,
-      content: [{ type: 'text', text: m.content }]
-    }));
-
-  const doFetch = (params) => {
-    const body = {
-      model: cfg.model || 'claude-opus-5',
-      max_tokens: cfg.maxTokens || 8192,
-      stream: true,
-      messages: [...userMessages]
-    };
-    if (cfg.systemPrompt) body.system = [{ type: 'text', text: cfg.systemPrompt }];
-    Object.assign(body, params);
-    return fetch(`${baseUrl}/v1/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': cfg.apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify(body)
-    });
-  };
-
-  const resp = await sendWithReasoning(doFetch, baseUrl, cfg.reasoningEffort, true, cfg.model);
-  if (!resp.ok) throw new Error(httpErrMsg(resp.status, await resp.text()));
-
-  if (h.onStatus) h.onStatus('connected');
-
-  const reader = resp.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-  let gotContent = false;
-  let gotReasoning = false;
-  let reasoningLen = 0;
-  let reasoningBuf = '';
-  let firstPacket = true;
-  let streamEnded = false;
-
-  try {
-    while (!streamEnded) {
-      let done, value;
-      ({ done, value } = await readWithTimeout(
-        reader,
-        firstPacket ? FIRST_BYTE_TIMEOUT_MS : IDLE_TIMEOUT_MS,
-        firstPacket
-      ));
-      firstPacket = false;
-      if (done) break;
-
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split(/\r?\n/);
-      buf = lines.pop();
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith(':')) continue;   // 空行或心跳注释
-        if (!trimmed.startsWith('data:')) continue;
-        const jsonStr = trimmed.slice(5).trim();
-        if (!jsonStr) continue;
-        if (jsonStr === '[DONE]') { streamEnded = true; break; }
-
-        let data;
-        try { data = JSON.parse(jsonStr); } catch { continue; }
-        if (data.type === 'error') throw new Error(data.error?.message || 'API 返回错误');
-
-        if (data.type === 'content_block_delta') {
-          const d = data.delta || {};
-          // 推理模型的思考过程：thinking_delta
-          if (d.type === 'thinking_delta' && d.thinking) {
-            gotReasoning = true;
-            reasoningLen += d.thinking.length;
-            if (reasoningBuf.length < 6000) reasoningBuf += d.thinking;
-            if (h.onReasoning) h.onReasoning(d.thinking, reasoningLen);
-          } else if (d.type === 'text_delta' && d.text) {
-            gotContent = true;
-            if (h.onChunk) h.onChunk(d.text);
-          }
-        } else if (data.type === 'message_stop') {
-          streamEnded = true; break;
-        }
-      }
-    }
-  } finally {
-    try { await reader.cancel(); } catch {}
-  }
-
-  if (!gotContent) {
-    if (gotReasoning && reasoningBuf.trim()) {
-      if (h.onChunk) {
-        h.onChunk(`（模型只输出了思考过程、没有生成正式回复，以下是它的思考内容。\n`
-                + `可将「思考强度」设为 no_think，或换用非推理模型）\n\n` + reasoningBuf.trim());
-      }
-      return;
-    }
-    throw new Error('模型没有返回任何内容。请检查模型名与 Base URL 是否匹配');
+    throw new Error('模型没有返回任何内容。请检查模型名是否为 deepseek-flash / deepseek-v4-pro，以及 API Key 是否有效');
   }
 }
 
@@ -1022,11 +725,12 @@ function renderModelBar() {
       dropEl.querySelectorAll('.model-option').forEach(o => o.classList.remove('active'));
       opt.classList.add('active');
       dropEl.classList.remove('open');
-      // 持久化
+      // 持久化：写回归一化后的配置，顺便清掉旧厂商残留；本地 Key 不落 storage
       const cfgData = await chrome.storage.sync.get(CONFIG_KEY);
-      const stored = cfgData[CONFIG_KEY] || {};
-      stored.model = m.id;
-      await chrome.storage.sync.set({ [CONFIG_KEY]: stored });
+      const next = { ...(resolveCfg(cfgData[CONFIG_KEY]) || {}), model: m.id };
+      const localKey = (window.LUMEN_LOCAL_CONFIG && window.LUMEN_LOCAL_CONFIG.apiKey) || '';
+      if (next.apiKey === localKey) delete next.apiKey;
+      await chrome.storage.sync.set({ [CONFIG_KEY]: next });
     });
     dropEl.appendChild(opt);
   });

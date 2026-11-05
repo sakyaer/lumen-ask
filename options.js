@@ -76,8 +76,6 @@ const customModelGroup = $('customModelGroup');
 const systemPromptInput = $('systemPrompt');
 const enableSelectionInput = $('enableSelection');
 const selectionModelInput = $('selectionModel');
-const reasoningEffortInput = $('reasoningEffort');
-const selectionReasoningEffortInput = $('selectionReasoningEffort');
 const panelWidthInput = $('panelWidth');
 const replyHeightInput = $('replyHeight');
 const presetEditor = $('presetEditor');
@@ -111,18 +109,24 @@ document.querySelectorAll('.theme-card').forEach(card => {
 
 // === Load config ===
 chrome.storage.sync.get(STORAGE_KEY, result => {
-  const cfg = result[STORAGE_KEY] || {};
+  const stored = result[STORAGE_KEY];
+  // 统一走 config-defaults.js：旧腾讯配置会被自动迁移成 DeepSeek 默认值
+  const cfg = window.LumenConfig
+    ? LumenConfig.resolveConfig(stored)
+    : (stored || {});
   if (cfg.apiKey) apiKeyInput.value = cfg.apiKey;
   if (cfg.baseUrl) baseUrlInput.value = cfg.baseUrl;
   if (cfg.systemPrompt) systemPromptInput.value = cfg.systemPrompt;
   if (cfg.enableSelection !== undefined) enableSelectionInput.checked = cfg.enableSelection;
-  if (cfg.selectionModel) selectionModelInput.value = cfg.selectionModel;
-  if (cfg.reasoningEffort && reasoningEffortInput) reasoningEffortInput.value = cfg.reasoningEffort;
-  // 划词默认最低思考；未配置过的老用户也展示为 no_think
-  if (selectionReasoningEffortInput) {
-    selectionReasoningEffortInput.value =
-      cfg.selectionReasoningEffort !== undefined ? cfg.selectionReasoningEffort : 'no_think';
+  // 「划词使用的模型」用 storage 里的原始值：'' 表示跟随主配置
+  const rawSelectionModel = stored && stored.selectionModel !== undefined ? stored.selectionModel : '';
+  if (rawSelectionModel && !selectionModelInput.querySelector(`option[value="${rawSelectionModel}"]`)) {
+    const opt = document.createElement('option');
+    opt.value = rawSelectionModel;
+    opt.textContent = rawSelectionModel;
+    selectionModelInput.appendChild(opt);
   }
+  selectionModelInput.value = rawSelectionModel;
   tokenLimitInput.value = cfg.tokenLimit || DEFAULT_TOKEN_LIMIT;
   // 面板尺寸：默认宽度 468 = 原 360×1.3，回答区 374 = 原 288×1.3（整体上调 30%）
   panelWidthInput.value = cfg.panelWidth || 468;
@@ -183,7 +187,7 @@ btnResetToken.addEventListener('click', async () => {
 // === Save config ===
 saveBtn.addEventListener('click', async () => {
   const apiKey = apiKeyInput.value.trim();
-  const baseUrl = (baseUrlInput.value.trim() || 'https://api.openai.com/v1').replace(/\/$/, '');
+  const baseUrl = (baseUrlInput.value.trim() || 'https://api.deepseek.com').replace(/\/$/, '');
   const model = modelSelect.value === 'custom'
     ? customModelInput.value.trim()
     : modelSelect.value;
@@ -193,29 +197,21 @@ saveBtn.addEventListener('click', async () => {
   const tokenLimit = parseInt(tokenLimitInput.value) || DEFAULT_TOKEN_LIMIT;
   const theme = themeValueInput.value || 'duolingo';
 
-  if (!apiKey) {
-    showMsg('请输入 API Key', 'error');
-    apiKeyInput.focus();
-    return;
-  }
+  // 允许留空：此时使用 config.local.js 里的本地 Key（resolveConfig 会自动补上）
   if (!model) {
     showMsg('请选择或输入模型名称', 'error');
     return;
   }
 
-  // 值可能带空格（从别处粘进来的），trim 后再存，避免 " high" 这类非法参数被原样发出去
-  const reasoningEffort = reasoningEffortInput ? reasoningEffortInput.value.trim() : '';
-
-  const selectionReasoningEffort = selectionReasoningEffortInput
-    ? selectionReasoningEffortInput.value.trim()
-    : 'no_think';
-
   const panelWidth = Math.min(Math.max(parseInt(panelWidthInput.value) || 468, 320), 800);
   const replyHeight = Math.min(Math.max(parseInt(replyHeightInput.value) || 374, 120), 800);
 
+  // 与 config.local.js 里的本地 Key 相同时不写入 storage，避免把密钥同步出去
+  const localKey = (window.LUMEN_LOCAL_CONFIG && window.LUMEN_LOCAL_CONFIG.apiKey) || '';
+  const apiKeyToStore = apiKey && apiKey !== localKey ? apiKey : '';
+
   const config = {
-    apiKey, baseUrl, model, systemPrompt, enableSelection, selectionModel,
-    reasoningEffort, selectionReasoningEffort,
+    apiKey: apiKeyToStore, baseUrl, model, systemPrompt, enableSelection, selectionModel,
     panelWidth, replyHeight,
     presetPrompts: collectPresets(), tokenLimit, theme
   };
