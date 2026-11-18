@@ -76,6 +76,8 @@ const customModelGroup = $('customModelGroup');
 const systemPromptInput = $('systemPrompt');
 const enableSelectionInput = $('enableSelection');
 const selectionModelInput = $('selectionModel');
+const reasoningEffortInput = $('reasoningEffort');
+const selectionReasoningEffortInput = $('selectionReasoningEffort');
 const panelWidthInput = $('panelWidth');
 const replyHeightInput = $('replyHeight');
 const presetEditor = $('presetEditor');
@@ -127,6 +129,8 @@ chrome.storage.sync.get(STORAGE_KEY, result => {
     selectionModelInput.appendChild(opt);
   }
   selectionModelInput.value = rawSelectionModel;
+  reasoningEffortInput.value = cfg.reasoningEffort || '';
+  selectionReasoningEffortInput.value = cfg.selectionReasoningEffort || '';
   tokenLimitInput.value = cfg.tokenLimit || DEFAULT_TOKEN_LIMIT;
   // 面板尺寸：默认宽度 468 = 原 360×1.3，回答区 374 = 原 288×1.3（整体上调 30%）
   panelWidthInput.value = cfg.panelWidth || 468;
@@ -194,6 +198,12 @@ saveBtn.addEventListener('click', async () => {
   const systemPrompt = systemPromptInput.value.trim();
   const enableSelection = enableSelectionInput.checked;
   const selectionModel = selectionModelInput.value;
+  const reasoningEffort = (window.LumenConfig && LumenConfig.normalizeEffort)
+    ? LumenConfig.normalizeEffort(reasoningEffortInput.value, 'low')
+    : (reasoningEffortInput.value || 'low');
+  const selectionReasoningEffort = (window.LumenConfig && LumenConfig.normalizeEffort)
+    ? LumenConfig.normalizeEffort(selectionReasoningEffortInput.value, 'low')
+    : (selectionReasoningEffortInput.value || 'low');
   const tokenLimit = parseInt(tokenLimitInput.value) || DEFAULT_TOKEN_LIMIT;
   const theme = themeValueInput.value || 'duolingo';
 
@@ -212,6 +222,7 @@ saveBtn.addEventListener('click', async () => {
 
   const config = {
     apiKey: apiKeyToStore, baseUrl, model, systemPrompt, enableSelection, selectionModel,
+    reasoningEffort, selectionReasoningEffort,
     panelWidth, replyHeight,
     presetPrompts: collectPresets(), tokenLimit, theme
   };

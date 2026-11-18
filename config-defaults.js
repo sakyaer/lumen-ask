@@ -6,11 +6,44 @@
   'use strict';
 
   // 统一使用 DeepSeek 官方 API（OpenAI 兼容协议）
+  // 思考强度：官方默认 high；这里默认 low，减少翻译/问答的等待时间。
   const DEFAULTS = {
     baseUrl: 'https://api.deepseek.com',
     model: 'deepseek-flash',
     selectionModel: 'deepseek-flash',
+    reasoningEffort: 'low',
+    selectionReasoningEffort: 'low',
   };
+
+  // 可选值：'' 跟随接口默认(high) / off 关闭思考 / low / high / max
+  const EFFORT_ALIASES = {
+    '': '', none: 'off', off: 'off', disabled: 'off',
+    minimal: 'low', min: 'low', low: 'low',
+    medium: 'high', default: 'high', high: 'high', xhigh: 'high',
+    max: 'max', ultra: 'max',
+  };
+
+  function normalizeEffort(value, fallback) {
+    if (value == null) return fallback;
+    const key = String(value).trim().toLowerCase();
+    return Object.prototype.hasOwnProperty.call(EFFORT_ALIASES, key)
+      ? EFFORT_ALIASES[key]
+      : fallback;
+  }
+
+  /** 生成 DeepSeek 思考模式相关的请求参数（OpenAI 格式） */
+  function thinkingParams(cfg, selection) {
+    const c = cfg || {};
+    const effort = normalizeEffort(
+      selection ? c.selectionReasoningEffort : c.reasoningEffort,
+      DEFAULTS.reasoningEffort
+    );
+    if (effort === 'off') return { thinking: { type: 'disabled' } };
+    if (effort === 'low' || effort === 'high' || effort === 'max') {
+      return { thinking: { type: 'enabled' }, reasoning_effort: effort };
+    }
+    return {}; // 不传参数，使用接口默认值（默认开启且 high）
+  }
 
   // 旧版本（腾讯 Token Plan 等）写入存储的模型名，识别到就整体迁移为 DeepSeek 默认值
   const LEGACY_MODEL_RE = /^(hy4-preview|hy3|tc-code-latest|glm-|minimax-|kimi-|qwen|gpt-|claude-|deepseek\/|deepseek-v4-(?:pro|flash)-20\d{4})/i;
@@ -60,9 +93,8 @@
       const out = {
         ...DEFAULTS,
         apiKey: local || '',
-        // DeepSeek 没有思考强度参数，清掉旧值避免发给接口
-        reasoningEffort: '',
-        selectionReasoningEffort: '',
+        reasoningEffort: normalizeEffort(s.reasoningEffort, DEFAULTS.reasoningEffort),
+        selectionReasoningEffort: normalizeEffort(s.selectionReasoningEffort, DEFAULTS.selectionReasoningEffort),
       };
       for (const key of PREF_KEYS) {
         if (s[key] !== undefined) out[key] = s[key];
@@ -77,12 +109,12 @@
       model: s.model || DEFAULTS.model,
       selectionModel: s.selectionModel || s.model || DEFAULTS.selectionModel,
       apiKey: s.apiKey || local,
-      reasoningEffort: '',
-      selectionReasoningEffort: '',
+      reasoningEffort: normalizeEffort(s.reasoningEffort, DEFAULTS.reasoningEffort),
+      selectionReasoningEffort: normalizeEffort(s.selectionReasoningEffort, DEFAULTS.selectionReasoningEffort),
     };
   }
 
-  const api = { DEFAULTS, resolveConfig, isDeepSeekBase, isLegacyModel };
+  const api = { DEFAULTS, resolveConfig, thinkingParams, normalizeEffort, isDeepSeekBase, isLegacyModel };
 
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = api;

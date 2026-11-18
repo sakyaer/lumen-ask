@@ -1199,8 +1199,14 @@
     // 面板已打开即视为划词已启用，此处不再重复检查 enableSelection，
     // 避免缓存(open)与实时配置(false)不一致时「面板能开、点了没反应」。
 
-    // 划词面板支持独立选择模型：cfg.selectionModel 优先，其次跟随主配置
-    if (cfg.selectionModel) cfg = { ...cfg, model: cfg.selectionModel };
+    // 划词面板支持独立选择模型与思考强度：cfg.selectionModel / selectionReasoningEffort 优先
+    if (cfg.selectionModel) {
+      cfg = {
+        ...cfg,
+        model: cfg.selectionModel,
+        reasoningEffort: cfg.selectionReasoningEffort ?? cfg.reasoningEffort
+      };
+    }
 
     lastUsedModel = cfg.model || null;
     renderModelSelect(cfg);

@@ -103,7 +103,7 @@ function httpErrMsg(status, text) {
 }
 
 // 发一次请求；HTTP 非 2xx 时抛出带接口信息的错误，便于直接展示给用户。
-// DeepSeek 走标准 OpenAI 兼容协议，不需要额外的思考强度参数：
+// DeepSeek 走标准 OpenAI 兼容协议；思考强度由设置页控制，默认 low。
 // 思考过程（若有）会放在 reasoning_content 字段里。
 async function fetchChat(doFetch) {
   let resp;
@@ -176,7 +176,8 @@ async function handleStreamChat(payload, tabId, requestId) {
       messages: cfg.systemPrompt
         ? [{ role: 'system', content: cfg.systemPrompt }, ...messages]
         : messages,
-      stream: true
+      stream: true,
+      ...LumenConfig.thinkingParams(cfg)
     };
 
     const resp = await fetchChat(() => fetch(`${baseUrl}/chat/completions`, {
@@ -298,7 +299,7 @@ async function probeRaw({ cfg: rawCfg, messages }) {
   const baseUrl = (cfg.baseUrl || 'https://api.deepseek.com').replace(/\/$/, '');
   const url = `${baseUrl}/chat/completions`;
 
-  const body = { model: cfg.model, stream: false, messages };
+  const body = { model: cfg.model, stream: false, messages, ...LumenConfig.thinkingParams(cfg) };
 
   const started = Date.now();
   const resp = await fetch(url, {

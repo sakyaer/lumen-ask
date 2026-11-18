@@ -429,7 +429,7 @@ function readWithTimeout(reader, ms, isFirst) {
   ]).finally(() => clearTimeout(timer));
 }
 
-// DeepSeek 走标准 OpenAI 兼容协议，不需要任何思考强度参数：
+// DeepSeek 走标准 OpenAI 兼容协议；思考强度由设置页控制，默认 low。
 // 模型清单：deepseek-flash（V4.1 Flash）/ deepseek-v4-pro（V4 Pro）。
 function httpErrMsg(status, text) {
   let msg = `HTTP ${status}`;
@@ -461,12 +461,16 @@ async function streamChat(cfg, messages, handlers) {
 
 // ===== OpenAI-compatible（DeepSeek）=====
 async function streamChatOpenAI(cfg, baseUrl, messages, h) {
+  const thinking = (typeof LumenConfig !== 'undefined' && LumenConfig.thinkingParams)
+    ? LumenConfig.thinkingParams(cfg)
+    : {};
   const body = {
     model: cfg.model || 'deepseek-flash',
     messages: cfg.systemPrompt
       ? [{ role: 'system', content: cfg.systemPrompt }, ...messages]
       : messages,
-    stream: true
+    stream: true,
+    ...thinking
   };
 
   const resp = await fetchChat(() => fetch(`${baseUrl}/chat/completions`, {
@@ -851,6 +855,99 @@ async function persistWordbook() {
   await chrome.storage.local.set({ [WORDBOOK_KEY]: wordbook });
 }
 
+// ===== 单词本发音：剑桥词典官方 mp3（无需 API Key） =====
+// 规则：https://dictionary.cambridge.org/media/english/us_pron/{首字母}/{前3字母}/{前5字母}/{单词}.mp3
+// 部分词走录音编号路径，推导失败时退回抓取词典页里的真实 us_pron 地址。
+const WB_AUDIO_URL_CACHE = new Map();
+let wbAudio = null;
+let wbPlaySeq = 0;
+
+function wbCambridgeWord(term) {
+  const w = String(term || '').trim().toLowerCase();
+  return /^[a-z]{1,40}$/.test(w) ? w : '';
+}
+
+function wbCambridgeUsUrl(word) {
+  const w = wbCambridgeWord(word);
+  if (!w) return '';
+  const pad = (s, n) => (s + '_'.repeat(n)).slice(0, n);
+  return `https://dictionary.cambridge.org/media/english/us_pron/${w[0]}/${pad(w, 3)}/${pad(w, 5)}/${w}.mp3`;
+}
+
+async function wbCambridgeRealUrl(word) {
+  const page = `https://dictionary.cambridge.org/dictionary/english/${encodeURIComponent(word)}`;
+  try {
+    // 带上站点 Cookie：若之前为通过剑桥验证打开过词典页，兜底解析更容易成功
+    const resp = await fetch(page, { credentials: 'include' });
+    if (!resp.ok) return '';
+    const html = await resp.text();
+    const m = html.match(/https:\/\/dictionary\.cambridge\.org\/media\/english\/us_pron\/[^"'\s<>]+\.mp3/i);
+    return m ? m[0] : '';
+  } catch (e) {
+    console.warn('[Lumen Ask] 剑桥发音兜底解析失败', e);
+    return '';
+  }
+}
+
+function wbSpeakerState(btn, state) {
+  if (!btn) return;
+  btn.classList.toggle('playing', state === 'playing');
+  btn.classList.toggle('failed', state === 'failed');
+  btn.title = state === 'playing' ? '播放中…' : state === 'failed' ? '发音加载失败' : '播放美式发音';
+}
+
+function wbStopAudio() {
+  if (wbAudio) {
+    try { wbAudio.pause(); } catch (e) { /* ignore */ }
+    wbAudio = null;
+  }
+  document.querySelectorAll('.wb-speak.playing').forEach(btn => wbSpeakerState(btn, ''));
+}
+
+function wbPlayOnce(src, seq, btn) {
+  return new Promise(resolve => {
+    if (seq !== wbPlaySeq || !src) return resolve(false);
+    const audio = new Audio(src);
+    wbAudio = audio;
+    wbSpeakerState(btn, 'playing');
+    let settled = false;
+    const finish = ok => {
+      if (settled) return;
+      settled = true;
+      if (wbAudio === audio) wbAudio = null;
+      if (seq === wbPlaySeq) wbSpeakerState(btn, ok ? '' : 'failed');
+      resolve(ok);
+    };
+    audio.onended = () => finish(true);
+    audio.onerror = () => finish(false);
+    audio.play().catch(() => finish(false));
+  });
+}
+
+async function wbPlayPronunciation(word, btn) {
+  const w = wbCambridgeWord(word);
+  if (!w) return;
+  const seq = ++wbPlaySeq;
+  wbStopAudio();
+
+  let url = WB_AUDIO_URL_CACHE.get(w);
+  if (url === undefined) {
+    url = wbCambridgeUsUrl(w);
+    WB_AUDIO_URL_CACHE.set(w, url);
+  }
+
+  let ok = await wbPlayOnce(url, seq, btn);
+  if (!ok && seq === wbPlaySeq) {
+    const real = await wbCambridgeRealUrl(w);
+    if (seq !== wbPlaySeq) return;
+    if (real && real !== url) {
+      WB_AUDIO_URL_CACHE.set(w, real);
+      ok = await wbPlayOnce(real, seq, btn);
+    }
+  }
+  if (!ok && seq === wbPlaySeq) console.warn(`[Lumen Ask] 无法播放发音：${w}`);
+}
+
 function renderWordbook() {
   if (!wbListEl) return;
   const q = (wbSearchEl.value || '').trim().toLowerCase();
@@ -879,12 +976,23 @@ function renderWordbook() {
   items.forEach(entry => {
     const open = wbExpanded.has(entry.id);
     const url = /^https?:/i.test(entry.url || '') ? entry.url : '';
+    const speakWord = wbCambridgeWord(entry.term);
+    const speakBtn = speakWord
+      ? `<button class="wb-speak" data-act="speak" data-word="${escHtml(speakWord)}" title="播放美式发音" aria-label="播放发音">
+           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+             <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+             <path d="M15.5 8.5a5 5 0 0 1 0 7"></path>
+             <path d="M19 5a9 9 0 0 1 0 14"></path>
+           </svg>
+         </button>`
+      : '';
     const card = document.createElement('article');
     card.className = 'wb-card' + (open ? ' open' : '');
     card.dataset.id = entry.id;
     card.innerHTML = `
       <div class="wb-card-head">
         <span class="wb-term" title="点击展开/收起">${escHtml(entry.term || '')}</span>
+        ${speakBtn}
         <span class="wb-time">${relativeTime(entry.updatedAt || entry.createdAt || Date.now())}</span>
       </div>
       <div class="wb-body">${LumenMD.render(entry.result || '')}</div>
@@ -916,6 +1024,11 @@ if (wbListEl) {
     const id = card.dataset.id;
     const actEl = e.target.closest('[data-act]');
     const act = actEl ? actEl.dataset.act : '';
+
+    if (act === 'speak') {
+      wbPlayPronunciation(actEl.dataset.word, actEl);
+      return;
+    }
 
     if (act === 'copy') {
       const entry = wordbook.find(x => x.id === id);
